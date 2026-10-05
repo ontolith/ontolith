@@ -84,7 +84,19 @@ merged 0.97. Corroboration is surfaced, not synthesized.
 
 **Provenance** — who, what source, when, which model+version, why, and the
 full delegation chain — is captured automatically on every assertion and
-retrievable in a single call (`kb.provenance(assertion_id)`).
+retrievable in a single call (`kb.provenance(assertion_id)`). The "why" is
+a dedicated `rationale` field — free text, optional, accepted by
+`assert_literal()`/`propose()`/`propose_ref()` right alongside `source` and
+`confidence`. It's deliberately separate from the scalar: `confidence` is
+the cheap signal a policy can threshold on without reasoning about it,
+`rationale` is where the actual justification or cited evidence lives for
+a human (or another agent) auditing the claim later. Neither replaces the
+other, and neither drives the routing decision itself — whether a
+differing value opens a contradiction or supersedes the prior one depends
+only on the predicate's declared temporality and cardinality (§10.1); a
+human resolving a contradiction has both `confidence` and `rationale`
+available as context, but nothing is auto-ranked or auto-resolved from
+them.
 
 ## Temporality: static vs. time-varying
 
