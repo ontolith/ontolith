@@ -315,11 +315,8 @@ class WriteAssertionIn(BaseModel):
     Exactly one of (``value`` and ``value_type``) or ``target`` must be
     set. Requires write or admin capability and a non-AI principal —
     enforced by ``Ontology.assert_literal``/``assert_ref``, not this
-    schema. Unlike ``ProposeIn``, ``target`` writes accept no
-    ``rationale`` (``assert_ref`` doesn't take one — an existing SDK-level
-    asymmetry with ``assert_literal``, not a REST omission). ``supersedes``
-    (ADR-0050/KI-080, KI-099) is the same opt-in ``ProposeIn`` has — see its
-    own docstring.
+    schema. ``supersedes`` (ADR-0050/KI-080, KI-099) is the same opt-in
+    ``ProposeIn`` has — see its own docstring.
     """
 
     subject: str
@@ -911,6 +908,7 @@ def create_rest_app(
                 author=principal.id,
                 confidence=body.confidence,
                 source=body.source,
+                rationale=body.rationale,
                 acting_as=body.acting_as,
                 model=body.model,
                 valid_from=body.valid_from,

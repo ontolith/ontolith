@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyproject.toml`'s `Documentation` URL pointed at an unreachable
   readthedocs.io page that was never deployed; now points at the new
   GitHub Pages site.
+- `Ontology.assert_ref()` now accepts `rationale`, matching
+  `assert_literal()`/`propose()`/`propose_ref()` — a real asymmetry
+  where a direct reference assertion couldn't carry a rationale even
+  though a direct literal assertion could. `POST /assertions`'
+  `rationale` field is now actually forwarded on `target` (ref) writes
+  too — it was already accepted in the request body but silently
+  dropped for that branch.
 
 ## [1.0.0] - 2026-09-28
 

@@ -129,11 +129,15 @@ class TestOntology:
             target=org.id,
             author="alice@example.com",
             confidence=1.0,
+            source="test",
+            rationale="LinkedIn profile lists this employer",
         )
 
         assert assertion.value_kind == "ref"
         assert assertion.value_type is None  # No type for refs
         assert assertion.value == org.id
+        assert assertion.source == "test"
+        assert assertion.rationale == "LinkedIn profile lists this employer"
 
     def test_assert_literal_requires_write_capability(self, kb: Ontology) -> None:
         """SPEC §9.3: direct writes require >= write capability."""

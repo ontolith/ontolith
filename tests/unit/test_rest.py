@@ -1200,12 +1200,19 @@ class TestWriteAssertionRoute:
         token, _ = kb.issue_token(HUMAN, author=ADMIN)
         response = client.post(
             "/assertions",
-            json={"subject": person.id, "predicate": "Person.employer", "target": org.id},
+            json={
+                "subject": person.id,
+                "predicate": "Person.employer",
+                "target": org.id,
+                "rationale": "LinkedIn profile lists this employer",
+            },
             headers=_auth(token),
         )
 
         assert response.status_code == 201
-        assert response.json()["value"] == org.id
+        body = response.json()
+        assert body["value"] == org.id
+        assert body["rationale"] == "LinkedIn profile lists this employer"
 
     def test_both_value_and_target_returns_400(self, tmp_path: Path) -> None:
         kb = _kb(tmp_path)
