@@ -1121,6 +1121,7 @@ class Ontology:
         *,
         confidence: float | None = None,
         source: str | None = None,
+        rationale: str | None = None,
         acting_as: str | None = None,
         model: str | None = None,
         valid_from: datetime | None = None,
@@ -1140,6 +1141,7 @@ class Ontology:
             author: Principal ID making this assertion
             confidence: Optional confidence (0.0-1.0)
             source: Optional source of information
+            rationale: Optional why this assertion was made
             acting_as: Optional principal ID being acted on behalf of (delegation)
             model: Model family+version (AI principals cannot reach this
                 direct-write path — see _check_direct_write_capability — so
@@ -1187,6 +1189,7 @@ class Ontology:
             acting_as=acting_as,
             confidence=confidence,
             source=source,
+            rationale=rationale,
             model=model,
             asserted_at=self.clock.now(),
             valid_from=valid_from,
