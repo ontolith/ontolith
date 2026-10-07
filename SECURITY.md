@@ -6,7 +6,8 @@ If you discover a security vulnerability, please report it privately.
 
 **Do not open a public issue.**
 
-Contact: matheus.boni.vicari@gmail.com
+Use GitHub's private vulnerability reporting:
+<https://github.com/ontolith/ontolith/security/advisories/new>
 
 Include:
 - Description of the vulnerability
@@ -24,7 +25,8 @@ Include:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.x.x   | :white_check_mark: |
+| 1.x     | :white_check_mark: |
+| 0.x     | :x:                |
 
 ## Security Best Practices
 
