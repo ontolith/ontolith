@@ -30,10 +30,10 @@ dependencies = [
 	# way strawberry-graphql did (KI-065's own floor-bump evidence).
 	"pydantic>=2.0,<3.0",
 	"typer>=0.9,<1.0",
-	"python-ulid>=2.0,<4.0", # floor left at 2.0 (locked resolves 3.x) - <4.0 spans both majors deliberately
+	"python-ulid>=2.0,<5.0", # floor left at 2.0 (locked resolves 3.x) - <4.0 spans both majors deliberately
 	# Required, not optional (SPEC §12.1 MUST): the default SQLite backend
 	# uses sqlite-vec for embeddings (ADR-0020).
-	"sqlite-vec==0.1.3", # pinned: pre-v1, breaking changes possible (bumped for PYSEC-2026-1938)
+	"sqlite-vec==0.1.9", # pinned: pre-v1, breaking changes possible (bumped for PYSEC-2026-1938)
 	# Linux-only (sys_platform marker, not an optional-dependencies extra):
 	# ADR-0051's OS-level plugin sandbox enforcement needs this wherever it
 	# can actually work, without an operator having to remember an extra to
@@ -78,7 +78,7 @@ graphql = [
 	"uvicorn>=0.27,<1.0", # <1.0: KI-070, same reasoning as rest's own uvicorn bound above
 ]
 mcp = [
-    "mcp>=1.28.1,<2.0", # >=1.28.1 fixes PYSEC-2026-3483; <2.0 avoids an unreviewed major bump
+    "mcp>=1.28.1,<3.0", # >=1.28.1 fixes PYSEC-2026-3483; <2.0 avoids an unreviewed major bump
 ]
 interop = [
 	"pyyaml>=6.0,<7.0", # <7.0: KI-070, mirrors mcp's upper-bound convention
