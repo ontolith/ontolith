@@ -74,7 +74,7 @@ graphql = [
 	# broke this integration once; <1.0 only guards against the next major,
 	# not the next 0.x drift - security.yml's weekly pip-audit/scheduled
 	# scan is the real backstop for that, same as any other dependency.
-	"strawberry-graphql[fastapi]>=0.316,<1.0",
+	"strawberry-graphql[fastapi]>=0.327.2,<1.0", # >=0.327.2 fixes CVE-2026-107727 and CVE-2026-107728
 	"uvicorn>=0.27,<1.0", # <1.0: KI-070, same reasoning as rest's own uvicorn bound above
 ]
 mcp = [
