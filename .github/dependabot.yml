@@ -15,6 +15,12 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(deps)"
+    # Keep the upper bounds in pyproject.toml (KI-065/KI-070): never widen them
+    # on a bump; a major jump is a deliberate, reviewed change.
+    versioning-strategy: lockfile-only
+    ignore:
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
     groups:
       python-deps:
         patterns: ["*"]
