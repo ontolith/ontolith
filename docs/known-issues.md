@@ -2395,6 +2395,22 @@ Not started. (a) Add the kill family to `_PROCESS_ISOLATION_SYSCALLS`, ideally a
 
 ---
 
+## KI-112 — `assert_ref`/`propose_ref` never check that a relation's `target` entity is of the declared target concept ✓ RESOLVED (Backlog)
+
+**Severity:** Bug — a write silently produces a reference to an entity of the wrong type (e.g. an `Invoice` as a `Person.employer`)
+**Milestone target:** Backlog — resolved without a milestone change
+**SPEC reference:** SPEC §6 (relations declare a target concept)
+
+### Description
+
+KI-089 added `_require_existing_target`, which only checks that the `target` id names a real entity. `RelationDef.target_concept` was validated when the schema was built but never read on the write path, so a relation declared `Ref["Organization"]` accepted any existing entity — an extraction step that resolves a name to the wrong entity went through without an error and produced a reference no query over the declared type would ever expect.
+
+### Fix
+
+Added `SchemaIR.target_concept_of(predicate)` and `Ontology._require_target_concept(predicate, target)`, called from `assert_ref` and `propose_ref` right after the predicate-kind check, and again in `_replay_proposal_operations`' `assert_ref` branch so a proposal staged under an older schema version (or before this check existed) can't land a mismatched reference at accept time. Raises `ValidationError` naming the relation, the declared concept and the target's actual concept. A no-op when the namespace has no schema, matching every other schema-driven write check. Plugin `WriteView.propose_ref` goes through `Ontology.propose_ref`, so it is covered too. Existing mismatched rows are left untouched (assertions are append-only); a report of them is a possible follow-up. Declaring a relation target that several concepts satisfy (interfaces) remains out of scope.
+
+---
+
 ## Format
 
 Each entry follows this structure:
