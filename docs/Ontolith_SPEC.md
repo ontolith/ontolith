@@ -166,13 +166,15 @@ Codegen **MUST** be bidirectional: `classes → IR → YAML` and `YAML → IR �
 ```python
 from ontolith import Concept, Relation, Text, Date, Ref
 
+
 class Organization(Concept):
     name: Text
     industry: Text | None = None
 
+
 class Person(Concept):
     name: Text
-    born: Date | None = None                          # temporality defaults to "static"
+    born: Date | None = None  # temporality defaults to "static"
     employer: Ref["Organization"] = Relation(
         inverse="employees",
         cardinality="single",
@@ -270,16 +272,23 @@ changes_requested ──resubmit──▶ submitted
 
 ### 9.2 Policy engine contract (policy as a pure function)
 ```python
-class Decision: ...                  # one of:
+class Decision: ...  # one of:
+
+
 class AutoAccept(Decision): ...
+
+
 class RequireReview(Decision):
-    reviewers: list[str]; reason: str
+    reviewers: list[str]
+    reason: str
+
+
 class Reject(Decision):
     reason: str
 
+
 class PolicyStrategy(Protocol):
-    def evaluate(self, proposal: Proposal, principal: Principal,
-                 kb: ReadOnlyView) -> Decision: ...
+    def evaluate(self, proposal: Proposal, principal: Principal, kb: ReadOnlyView) -> Decision: ...
 ```
 `evaluate` **MUST** be pure (no writes, deterministic given inputs) so it is testable and replayable. Built-in strategies a conforming impl **SHOULD** provide: `ConfidenceThreshold`, `TrustLevel`, `SourceRequired`, `RequireReviewByRole`, `SourceQuorum`, and `Composite(all=…, any=…)`.
 
@@ -490,12 +499,16 @@ class StorageBackend(Protocol):
     # writes
     def put_entity(self, e: Entity, tx: Tx) -> None: ...
     def put_assertion(self, a: Assertion, tx: Tx) -> None: ...
-    def set_assertion_status(self, id: str, status: str,
-                             valid_to: str | None, tx: Tx) -> None: ...
+    def set_assertion_status(self, id: str, status: str, valid_to: str | None, tx: Tx) -> None: ...
     # reads
-    def assertions(self, namespace: str, subject: str | None,
-                   predicate: str | None, status: set[str],
-                   as_of: str | None) -> Iterable[Assertion]: ...
+    def assertions(
+        self,
+        namespace: str,
+        subject: str | None,
+        predicate: str | None,
+        status: set[str],
+        as_of: str | None,
+    ) -> Iterable[Assertion]: ...
     def get_entity(self, id: str) -> Entity | None: ...
     # vectors
     def vector_upsert(self, scope: str, id: str, vec: list[float]) -> None: ...
@@ -518,29 +531,39 @@ Plugins are discovered via Python entry points under the `ontolith.plugins` grou
 class Importer(Protocol):
     def import_(self, source, kb: WriteView) -> ImportReport: ...
 
+
 class Exporter(Protocol):
     def export(self, kb: ReadOnlyView, target) -> ExportReport: ...
 
+
 class Reasoner(Protocol):
-    def derive(self, kb: ReadOnlyView) -> list[Assertion]: ...   # proposed, never auto-written
+    def derive(self, kb: ReadOnlyView) -> list[Assertion]: ...  # proposed, never auto-written
+
 
 class Validator(Protocol):
     def validate(self, a: Assertion, kb: ReadOnlyView) -> list[Violation]: ...
 
+
 class Embedder(Protocol):
-    name: str; dim: int
+    name: str
+    dim: int
+
     def embed(self, texts: list[str]) -> list[list[float]]: ...
+
 
 class Connector(Protocol):
     def sync(self, kb: WriteView) -> SyncReport: ...
 
-class AuthProvider(Protocol):
-    def authenticate(self, request) -> Identity: ...             # -> principal_id (+ acting_as)
 
-class PolicyStrategy(Protocol):                                  # see §9.2
+class AuthProvider(Protocol):
+    def authenticate(self, request) -> Identity: ...  # -> principal_id (+ acting_as)
+
+
+class PolicyStrategy(Protocol):  # see §9.2
     def evaluate(self, proposal, principal, kb) -> Decision: ...
 
-class StorageBackend(Protocol): ...                              # see §12.3
+
+class StorageBackend(Protocol): ...  # see §12.3
 ```
 Reasoner-derived assertions **MUST** enter through the proposal path (§9); plugins **MUST NOT** bypass governance.
 

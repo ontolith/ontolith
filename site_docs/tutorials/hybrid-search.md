@@ -14,7 +14,7 @@ control:
 
 ```python
 kb = Ontology.connect(db_path)  # embedder defaults to a lightweight HashingEmbedder
-n = kb.reindex("Researcher")     # re-embeds every Researcher's Text content
+n = kb.reindex("Researcher")  # re-embeds every Researcher's Text content
 ```
 
 `reindex()` concatenates each entity's `Text`-typed active-assertion values

@@ -675,6 +675,7 @@ untrusted module import and `__init__` — necessarily, since attempting the ful
 is exactly what broke loading in round 1. A plugin's own code, once running, can do:
 ```python
 import ontolith.plugins.sandbox.enforcement as enf
+
 enf.apply_capability_enforcement = lambda caps: enf.EnforcementResult(applied=True, reason=None)
 ```
 and the subsequent lookup picks up the forged function instead of the real one. Reproduced directly
