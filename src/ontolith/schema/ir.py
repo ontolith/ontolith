@@ -182,6 +182,20 @@ class SchemaIR(BaseModel):
         field = self._resolve_field(predicate)
         return field.cardinality if field is not None else "single"
 
+    def target_concept_of(self, predicate: str) -> str | None:
+        """Resolve the declared target concept of a relation predicate.
+
+        Args:
+            predicate: Dotted predicate, e.g. "Person.employer"
+
+        Returns:
+            The relation's `target_concept`, or None if the predicate is
+            unresolvable or resolves to a PropertyDef — properties have no
+            target concept.
+        """
+        field = self._resolve_field(predicate)
+        return field.target_concept if isinstance(field, RelationDef) else None
+
     def value_type_of(self, predicate: str) -> str | None:
         """Resolve the declared value_type of a literal property predicate
         (SPEC §4, KI-031).

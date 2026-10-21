@@ -779,6 +779,33 @@ class Ontology:
         if self.get_entity(target) is None:
             raise NotFoundError(f"Target not found: {target!r}")
 
+    def _require_target_concept(self, predicate: str, target: str) -> None:
+        """Reject a ref write whose `target` entity is not of the concept
+        the relation declares (`RelationDef.target_concept`, SPEC §6) —
+        e.g. an `Invoice` written to a `Ref["Organization"]` relation.
+
+        Resolved against the schema current when the check runs, and a
+        no-op when no schema is registered for the namespace, or the
+        target is unknown (the caller's `_require_existing_target`
+        reports that). Runs at submission time for `assert_ref` and
+        `propose_ref`, and again at proposal replay, so a proposal staged
+        before this check existed — or under an older schema version —
+        can't land a mismatched reference. Existing mismatched rows are
+        left untouched (assertions are append-only).
+        """
+        schema = self.backend.get_schema(self.namespace)
+        if schema is None:
+            return
+        expected = schema.target_concept_of(predicate)
+        if expected is None:
+            return
+        entity = self.get_entity(target)
+        if entity is not None and entity.concept != expected:
+            raise ValidationError(
+                f"Relation {predicate!r} targets concept {expected!r}, but "
+                f"entity {target!r} is a {entity.concept!r}"
+            )
+
     def _require_valid_supersedes_hint(
         self,
         supersedes: str | None,
@@ -1164,8 +1191,10 @@ class Ontology:
                 (KI-083, KI-089)
             ValidationError: predicate is not declared in the active
                 schema, predicate is declared a property rather than a
-                relation (KI-040), a registered `Validator` rejects the
-                assertion (KI-042), supersedes is set but predicate isn't
+                relation (KI-040), target is not an entity of the
+                relation's declared target concept (KI-112), a registered
+                `Validator` rejects the assertion (KI-042), supersedes is
+                set but predicate isn't
                 cardinality="many"/temporality="time_varying" (ADR-0050),
                 or supersedes doesn't name a real, active,
                 overlapping-and-differing assertion on this (subject,
@@ -1175,6 +1204,7 @@ class Ontology:
         self._require_existing_subject(subject)
         self._require_existing_target(target)
         self._require_known_predicate(predicate, expected_kind="relation")
+        self._require_target_concept(predicate, target)
         temporality = self._resolve_temporality(predicate)
         self._require_valid_supersedes_hint(supersedes, predicate, temporality)
 
@@ -1579,8 +1609,10 @@ class Ontology:
             ValidationError: author is ai-kind and model is not provided,
                 predicate is not declared in the active schema, predicate
                 is declared a property rather than a relation (KI-040),
-                supersedes is set but predicate isn't cardinality="many"/
-                temporality="time_varying" (ADR-0050), or (on auto-accept)
+                target is not an entity of the relation's declared target
+                concept (KI-112), supersedes is set but predicate isn't
+                cardinality="many"/temporality="time_varying" (ADR-0050),
+                or (on auto-accept)
                 a registered `Validator` rejects the assertion (KI-042) or
                 supersedes doesn't name a real, active,
                 overlapping-and-differing assertion (ADR-0050)
@@ -1590,6 +1622,7 @@ class Ontology:
         self._require_existing_subject(subject)
         self._require_existing_target(target)
         self._require_known_predicate(predicate, expected_kind="relation")
+        self._require_target_concept(predicate, target)
         delegating = self._resolve_delegation(principal, author, acting_as)
         temporality = self._resolve_temporality(predicate)
         self._require_valid_supersedes_hint(supersedes, predicate, temporality)
@@ -2316,6 +2349,10 @@ class Ontology:
         `propose`/`propose_ref` call already ran them once; re-running them
         at replay time is `resubmit`'s own documented precedent to skip
         (see its docstring), not something this method decides on its own.
+        The one exception is the relation target-concept check
+        (`_require_target_concept`, KI-112), which does re-run for each
+        `assert_ref` op below, so a proposal staged under an older schema
+        version can't land a reference to the wrong concept.
         A schema change between submission and replay (e.g. a property
         redeclared a relation) can therefore let a now-mismatched write
         through unchecked — a narrow, pre-existing gap shared with KI-031,
@@ -2405,6 +2442,7 @@ class Ontology:
                     )
                 )
             elif op["kind"] == "assert_ref":
+                self._require_target_concept(op["predicate"], op["target"])
                 ref_assertion = Assertion(
                     id=self.id_provider.next(),
                     namespace=self.namespace,
