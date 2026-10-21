@@ -120,19 +120,22 @@ These exercise the actual API and MCP surfaces from the SPEC, so the vision stay
 ```python
 from ontolith import Ontology, Concept, Relation, Text, Date, Ref
 
+
 class Team(Concept):
     name: Text
+
 
 class Service(Concept):
     name: Text
     owner: Ref[Team] = Relation(inverse="services", temporality="time_varying")
 
+
 kb = Ontology.connect("acme-org", schema=[Team, Service])
 
 alice = kb.principal("alice@acme.com", kind="human")
-mapper = kb.principal("ownership-mapper", kind="ai",
-                      owner="alice@acme.com", auth="oidc",
-                      default_capability="propose")
+mapper = kb.principal(
+    "ownership-mapper", kind="ai", owner="alice@acme.com", auth="oidc", default_capability="propose"
+)
 
 # Agent reads Slack + the service catalog and proposes an ownership fact
 mapper.propose(
@@ -145,8 +148,8 @@ mapper.propose(
 
 # An internal app later asks the graph, and shows its work:
 svc = kb.get(Service, name="billing")
-print(svc.owner)                       # -> Team(name="Payments")
-print(svc.provenance("owner"))         # author, source, reviewer, confidence, valid_from
+print(svc.owner)  # -> Team(name="Payments")
+print(svc.provenance("owner"))  # author, source, reviewer, confidence, valid_from
 ```
 
 When ownership changes next quarter, the new proposal **supersedes** the old one (it's `time_varying`), and `kb.as_of("2026-03-01").get(Service, name="billing")` still returns the old owner — institutional memory, intact.
@@ -155,16 +158,20 @@ When ownership changes next quarter, the new proposal **supersedes** the old one
 
 ```python
 # Two agents participate in the same research namespace.
-scout   = kb.principal("scout",   kind="ai", owner="alice@acme.com", default_capability="propose")
+scout = kb.principal("scout", kind="ai", owner="alice@acme.com", default_capability="propose")
 auditor = kb.principal("auditor", kind="ai", owner="alice@acme.com", default_capability="propose")
 
 # scout proposes a (static) biographical fact
-scout.propose(Person(name="Ada Lovelace", born="1815-12-10"),
-              source="https://example.org/bio-A", confidence=0.82)
+scout.propose(
+    Person(name="Ada Lovelace", born="1815-12-10"),
+    source="https://example.org/bio-A",
+    confidence=0.82,
+)
 
 # auditor, grounding on another source, sees a conflicting date and flags it
 auditor.flag_contradiction(
-    subject="Ada Lovelace", predicate="born",
+    subject="Ada Lovelace",
+    predicate="born",
     note="Source bio-B gives 1815-12-10 but ledger gives a different date; please verify.",
 )
 # A contradiction object opens; BOTH assertions are retained but excluded from default
@@ -179,29 +186,35 @@ Over MCP, that same interaction is just two tool calls (`ontolith.propose`, `ont
 # As evidence accumulates, claims gain/lose support over time.
 litbot = kb.principal("litbot", kind="ai", owner="pi@lab.edu", default_capability="propose")
 
-litbot.propose(Claim(text="Compound X reduces marker M",
-                     status="supported", strength=0.6),
-               source="doi:10.1/aaa", confidence=0.6)
+litbot.propose(
+    Claim(text="Compound X reduces marker M", status="supported", strength=0.6),
+    source="doi:10.1/aaa",
+    confidence=0.6,
+)
 
 # A stronger meta-analysis arrives; reviewers accept an updated, higher-strength claim,
 # which supersedes the prior one along the validity timeline.
-litbot.propose(Claim(text="Compound X reduces marker M",
-                     status="supported", strength=0.85),
-               source="doi:10.1/meta-2026", confidence=0.85)
+litbot.propose(
+    Claim(text="Compound X reduces marker M", status="supported", strength=0.85),
+    source="doi:10.1/meta-2026",
+    confidence=0.85,
+)
 
 # What did the field believe a year ago vs now?
 last_year = kb.as_of("2025-06-01").query(Claim).where(text__contains="Compound X")
-today     = kb.query(Claim).where(text__contains="Compound X")
+today = kb.query(Claim).where(text__contains="Compound X")
 ```
 
 ### 4.4 Regulated lookup: "what was the policy on the transaction date?"
 
 ```python
 # A compliance app answers as-of-the-event, not as-of-today — the audit-critical question.
-policy_on_date = (kb.as_of(transaction.booked_at)
-                    .query(Regulation)
-                    .where(applies_to="cross-border-transfer")
-                    .min_confidence(0.9))
+policy_on_date = (
+    kb.as_of(transaction.booked_at)
+    .query(Regulation)
+    .where(applies_to="cross-border-transfer")
+    .min_confidence(0.9)
+)
 # Every returned rule carries its source, its reviewer, and the date it became effective.
 ```
 

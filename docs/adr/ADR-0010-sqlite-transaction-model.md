@@ -44,9 +44,11 @@ def begin(self) -> None:
     self.conn.execute("BEGIN")
     self._in_transaction = True
 
+
 def commit(self) -> None:
     self.conn.commit()
     self._in_transaction = False
+
 
 def rollback(self) -> None:
     self.conn.rollback()

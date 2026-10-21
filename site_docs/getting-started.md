@@ -68,10 +68,12 @@ representation):
 ```python
 from ontolith.schema import Concept, Date, Ref, Relation, Text, compile_schema
 
+
 class Person(Concept):
     name: Text
     born: Date | None = None
     collaboratedWith: Ref["Person"] = Relation()
+
 
 schema = compile_schema("default", 1, Person)
 kb.apply_schema(schema, author=alice.id)

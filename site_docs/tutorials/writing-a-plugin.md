@@ -48,10 +48,15 @@ it exactly as you would the real object — the sandboxed round-trip is
 transparent:
 
 ```python
-rows = [{
-    "concept": "Person", "natural_key": "grace",
-    "predicate": "Person.name", "value": "Grace Hopper", "value_kind": "literal",
-}]
+rows = [
+    {
+        "concept": "Person",
+        "natural_key": "grace",
+        "predicate": "Person.name",
+        "value": "Grace Hopper",
+        "value_kind": "literal",
+    }
+]
 report = loaded.instance.import_(rows, loaded.view)
 # {"rows_processed": 1, "entities_created": 1, "assertions_proposed": 1}
 ```
@@ -97,6 +102,7 @@ refuses it outright:
 ```python
 from ontolith.plugins.manifest import PluginCapabilities, PluginManifest
 
+
 class MyImporter:
     manifest = PluginManifest(
         name="my-importer",
@@ -105,8 +111,7 @@ class MyImporter:
         capabilities=PluginCapabilities(storage="propose"),
     )
 
-    def import_(self, source, kb):
-        ...
+    def import_(self, source, kb): ...
 ```
 
 `"propose"` is the minimum that lets registration succeed at all for a

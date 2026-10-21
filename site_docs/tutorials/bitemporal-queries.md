@@ -17,6 +17,7 @@ property `time_varying` tells Ontolith to route a differing value to
 ```python
 from ontolith.schema import Concept, Property, Text, compile_schema
 
+
 class Person(Concept):
     name: Text
     title: Text = Property(temporality="time_varying")
@@ -42,8 +43,11 @@ kb = Ontology.connect(db_path, clock=clock)
 # Recorded on 2023-01-01 (the clock's current time = asserted_at):
 # "Engineer" since 2020, no end date yet -- an open-ended window.
 kb.assert_literal(
-    subject=dana.id, predicate="Person.title", value="Engineer",
-    value_type="Text", author=hr.id,
+    subject=dana.id,
+    predicate="Person.title",
+    value="Engineer",
+    value_type="Text",
+    author=hr.id,
     valid_from=datetime(2020, 1, 1, tzinfo=UTC),
 )
 
@@ -53,8 +57,11 @@ clock.advance(days=150)  # now 2023-05-31
 # "Engineer" window and has a different value -- supersession closes the
 # prior window automatically (valid_to = this assertion's valid_from).
 kb.assert_literal(
-    subject=dana.id, predicate="Person.title", value="Senior Engineer",
-    value_type="Text", author=hr.id,
+    subject=dana.id,
+    predicate="Person.title",
+    value="Senior Engineer",
+    value_type="Text",
+    author=hr.id,
     valid_from=datetime(2023, 6, 1, tzinfo=UTC),
 )
 ```

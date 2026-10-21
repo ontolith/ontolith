@@ -126,17 +126,21 @@ Ontolith's meta-model is intentionally small. Everything else (governance, retri
 ```python
 from ontolith import Ontology, Concept, Relation, Text, Date, Ref
 
+
 # 1. Define the schema (the ontology) as code; declare temporality per field
 class Person(Concept):
     name: Text
-    born: Date | None = None                        # static (default): conflicts -> contradiction
+    born: Date | None = None  # static (default): conflicts -> contradiction
     employer: Ref["Organization"] = Relation(
-        inverse="employees", temporality="time_varying"   # changes -> temporal supersession
+        inverse="employees",
+        temporality="time_varying",  # changes -> temporal supersession
     )
+
 
 class Organization(Concept):
     name: Text
     industry: Text | None = None
+
 
 # 2. Open a shared knowledge base over that schema
 kb = Ontology.connect("acme-research", schema=[Person, Organization])
@@ -146,37 +150,34 @@ alice = kb.principal("alice@acme.com", kind="human")
 scout = kb.principal(
     "scout-agent",
     kind="ai",
-    owner="alice@acme.com",          # accountable human/team - REQUIRED for AI principals
-    auth="oidc",                      # service identity (client-credentials / workload identity)
-    default_capability="propose",     # read + propose by default; never direct write
+    owner="alice@acme.com",  # accountable human/team - REQUIRED for AI principals
+    auth="oidc",  # service identity (client-credentials / workload identity)
+    default_capability="propose",  # read + propose by default; never direct write
 )
 
 # 4. Agents propose; policy decides whether review is required
 proposal = scout.propose(
     Person(name="Ada Lovelace", born="1815-12-10"),
     source="https://example.org/biography",
-    confidence=0.82,                  # the agent's stated belief, 0.0-1.0
+    confidence=0.82,  # the agent's stated belief, 0.0-1.0
     rationale="Extracted from biography corpus, single source",
 )
 # Provenance auto-captures model+version and acting_as (the human who triggered scout).
 
 if proposal.confidence < kb.policy.auto_accept_threshold:
-    proposal.request_review(assignee=alice)        # human-in-the-loop
+    proposal.request_review(assignee=alice)  # human-in-the-loop
 else:
     proposal.accept()
 
 # 5. Query / ground - hybrid symbolic + semantic (sqlite-vec embedded by default)
-results = (kb.query(Person)
-             .where(employer=engine_co.id)
-             .semantic("computing pioneers")
-             .limit(10))
+results = kb.query(Person).where(employer=engine_co.id).semantic("computing pioneers").limit(10)
 
 # 6. Provenance, time-travel, and conflict are built in
 ada = kb.get(Person, name="Ada Lovelace")
-ada.history()                 # full change log across all principals
-ada.provenance("born")        # who/what asserted this, when, model+version, confidence
-ada.contradictions()          # any unresolved disagreements on static facts
-kb.as_of("2025-01-01").get(Person, name="Ada Lovelace")   # time-travel
+ada.history()  # full change log across all principals
+ada.provenance("born")  # who/what asserted this, when, model+version, confidence
+ada.contradictions()  # any unresolved disagreements on static facts
+kb.as_of("2025-01-01").get(Person, name="Ada Lovelace")  # time-travel
 ```
 
 The **same operations are exposed as MCP tools** (read/query, propose, flag_contradiction, provenance lookups), so any compliant agent can participate without bespoke glue.

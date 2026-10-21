@@ -55,8 +55,11 @@ reviewer = kb.create_principal(
     "reviewer@example.com", kind="human", default_capability="admin", trust_level=8
 )
 researcher_bot = kb.create_principal(
-    "researcher-bot", kind="ai", owner=reviewer.id,
-    default_capability="propose", trust_level=6,
+    "researcher-bot",
+    kind="ai",
+    owner=reviewer.id,
+    default_capability="propose",
+    trust_level=6,
 )
 ```
 
@@ -64,8 +67,13 @@ A human's write auto-accepts:
 
 ```python
 proposal, decision = kb.propose(
-    subject=acme.id, predicate="Company.headquarters", value="Springfield",
-    value_type="Text", author=reviewer.id, source="internal records", confidence=1.0,
+    subject=acme.id,
+    predicate="Company.headquarters",
+    value="Springfield",
+    value_type="Text",
+    author=reviewer.id,
+    source="internal records",
+    confidence=1.0,
 )
 # decision is an AutoAccept; proposal.state == "auto_accepted"
 ```
@@ -74,9 +82,14 @@ The AI's proposal — even from a well-trusted principal — does not:
 
 ```python
 proposal, decision = kb.propose(
-    subject=acme.id, predicate="Company.headquarters", value="Metropolis",
-    value_type="Text", author=researcher_bot.id, source="a news article",
-    confidence=0.7, model="example-model-2026-01",  # required for AI authors
+    subject=acme.id,
+    predicate="Company.headquarters",
+    value="Metropolis",
+    value_type="Text",
+    author=researcher_bot.id,
+    source="a news article",
+    confidence=0.7,
+    model="example-model-2026-01",  # required for AI authors
 )
 # decision is a RequireReview; proposal.state == "require_review"
 ```
@@ -91,7 +104,8 @@ A pending proposal can go three ways. This tutorial exercises all three:
 ```python
 # A reviewer isn't convinced by the source and asks for a better one.
 proposal = kb.request_changes(
-    proposal.id, reviewer=reviewer.id,
+    proposal.id,
+    reviewer=reviewer.id,
     reason="Need a primary source, not a news article.",
 )
 # proposal.state == "changes_requested"
@@ -114,9 +128,14 @@ still awaiting review):
 
 ```python
 proposal, decision = kb.propose(
-    subject=acme.id, predicate="Company.name", value="Extremely Legitimate Business Inc",
-    value_type="Text", author=researcher_bot.id, source="an anonymous forum post",
-    confidence=0.2, model="example-model-2026-01",
+    subject=acme.id,
+    predicate="Company.name",
+    value="Extremely Legitimate Business Inc",
+    value_type="Text",
+    author=researcher_bot.id,
+    source="an anonymous forum post",
+    confidence=0.2,
+    model="example-model-2026-01",
 )
 proposal = kb.reject_proposal(proposal.id, reviewer=reviewer.id, reason="Not a credible source.")
 # proposal.state == "rejected"

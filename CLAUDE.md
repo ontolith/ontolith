@@ -262,12 +262,13 @@ docs/adr/        # Architecture Decision Records (MADR format)
 ```python
 from ontolith import Concept, Relation, Text, Date, Ref
 
+
 class Person(Concept):
     name: Text
     born: Date | None = None  # temporality defaults to "static"
     employer: Ref["Organization"] = Relation(
         inverse="employees",
-        temporality="time_varying"  # changes supersede, don't contradict
+        temporality="time_varying",  # changes supersede, don't contradict
     )
 ```
 
