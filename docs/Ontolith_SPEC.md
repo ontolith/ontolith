@@ -393,7 +393,7 @@ amendment).
 
 ### 11.2 Symbolic semantics
 - Filters compile to predicate lookups over `active` assertions by default (or the `as_of` snapshot); see the opt-ins below.
-- Relation traversal (`employer__name`) joins across subject→ref→subject.
+- A relation filter (`employer="org-123"`) matches the queried concept's own relation assertions by target id. Multi-hop traversal across subject→ref→subject (e.g. `employer__name`) is deferred (§11.1, ADR-0027).
 - Flagged/superseded/retracted assertions are **excluded by default**; `.include_flagged()` (adds `flagged`) / `.include_history()` (adds `superseded`/`retracted`) opt in. Both widen which assertion statuses `.where()`, `.min_confidence()`, and `.trust_at_least()` match against; the result stays `list[Entity]` (ADR-0048).
 
 ### 11.3 Hybrid retrieval
