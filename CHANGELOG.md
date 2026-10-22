@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `SchemaIR.target_concept_of(predicate)` returns a relation's declared
+  target concept, or `None` for a property or unknown predicate.
 - Full documentation site (`mkdocs.yml` + `site_docs/`), deployed to GitHub
   Pages: Getting Started, Concepts, four tutorials (Governance & Review,
   Bitemporal Queries, Writing a Plugin, Hybrid Search), an Examples index,

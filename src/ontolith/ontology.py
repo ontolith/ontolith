@@ -2565,8 +2565,11 @@ class Ontology:
                 (KI-033)
             ValidationError: proposal is not pending review (including when
                 a concurrent transition already moved it out of that state,
-                KI-035); or a registered `Validator`/`completeness_validator`
-                rejects one of the replayed assertions (KI-042/KI-041)
+                KI-035); a staged ref operation's target is not of the
+                relation's declared target concept under the current schema
+                (KI-112); or a registered `Validator`/
+                `completeness_validator` rejects one of the replayed
+                assertions (KI-042/KI-041)
         """
         self._require_reviewer_principal(reviewer)
 
@@ -2850,8 +2853,10 @@ class Ontology:
             ValidationError: proposal is not awaiting resubmission (including
                 when a concurrent transition already moved it out of that
                 state between the optimistic check and the write, KI-035);
-                or, on auto-accept, a registered `Validator` rejects one of
-                the replayed assertions (KI-042)
+                or, on auto-accept, a staged ref operation's target is not of
+                the relation's declared target concept (KI-112) or a
+                registered `Validator` rejects one of the replayed
+                assertions (KI-042)
         """
         caller = self._get_principal_or_raise(author)
         proposal = self.backend.get_proposal(proposal_id)
