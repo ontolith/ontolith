@@ -17,7 +17,7 @@ from ontolith import Ontology
 from ontolith.core import FixedClock, SequentialIdProvider
 from ontolith.core.errors import ValidationError
 from ontolith.govern import Decision, RequireReview
-from ontolith.schema import ConceptDef, RelationDef, SchemaIR
+from ontolith.schema import ConceptDef, PropertyDef, RelationDef, SchemaIR
 
 T0 = datetime(2025, 1, 1, tzinfo=UTC)
 
@@ -140,3 +140,36 @@ def test_replay_rechecks_target_concept(make_kb: KbFactory) -> None:
         kb.accept_proposal(proposal.id, REVIEWER)
 
     assert kb.assertions(subject=person.id, predicate="Person.employer") == []
+    # The failed accept rolled back cleanly: the proposal is still pending.
+    still_pending = kb.backend.get_proposal(proposal.id)
+    assert still_pending is not None
+    assert still_pending.state == "require_review"
+
+
+def test_replay_skips_check_when_relation_no_longer_declared(make_kb: KbFactory) -> None:
+    """Pins the narrow replay gap KI-031/KI-040 already document: if the
+    schema has since redeclared the relation as a property, there is no
+    target concept left to check, so the staged ref replays unchecked."""
+    kb = _kb(make_kb, policy=_AlwaysReview())
+    person = kb.create_entity("Person", author=WRITER)
+    org = kb.create_entity("Organization", author=WRITER)
+    proposal, _ = kb.propose_ref(person.id, "Person.employer", org.id, WRITER)
+
+    kb.apply_schema(
+        SchemaIR(
+            namespace="default",
+            version=2,
+            concepts={
+                "Person": ConceptDef(
+                    name="Person",
+                    properties={"employer": PropertyDef(name="employer", value_type="Text")},
+                ),
+                "Organization": ConceptDef(name="Organization"),
+            },
+        ),
+        author=ADMIN,
+    )
+
+    kb.accept_proposal(proposal.id, REVIEWER)
+
+    assert len(kb.assertions(subject=person.id, predicate="Person.employer")) == 1
