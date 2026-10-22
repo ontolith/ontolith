@@ -386,3 +386,22 @@ class TestTargetConceptOf:
     def test_unknown_predicate_returns_none(self) -> None:
         assert self._schema().target_concept_of("Person.missing") is None
         assert self._schema().target_concept_of("Vehicle.owner") is None
+
+
+class TestRelationDefTargetAlias:
+    """RelationDef.target — read-only alias for target_concept, matching the
+    DSL's `Ref["X"]` wording (O-19)."""
+
+    def test_target_aliases_target_concept(self) -> None:
+        rel = RelationDef(name="employer", target_concept="Organization")
+        assert rel.target == "Organization"
+
+    def test_alias_is_not_a_serialized_field(self) -> None:
+        rel = RelationDef(name="employer", target_concept="Organization")
+        assert "target" not in rel.model_dump()
+        assert "target" not in RelationDef.model_fields
+
+    def test_alias_is_read_only(self) -> None:
+        rel = RelationDef(name="employer", target_concept="Organization")
+        with pytest.raises((AttributeError, ValueError)):
+            rel.target = "Other"  # type: ignore[misc]

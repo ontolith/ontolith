@@ -54,6 +54,12 @@ class RelationDef(BaseModel):
 
     model_config = {"frozen": True}
 
+    @property
+    def target(self) -> str:
+        """Alias for `target_concept`, matching the class DSL's `Ref["X"]`
+        wording. Read-only and not a serialized field."""
+        return self.target_concept
+
 
 class ConceptDef(BaseModel):
     """Concept definition in the IR.
