@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `RelationDef.target`, a read-only alias for `target_concept` that matches
+  the class DSL's `Ref["X"]` wording.
 - `SchemaIR.target_concept_of(predicate)` returns a relation's declared
   target concept, or `None` for a property or unknown predicate.
 - Full documentation site (`mkdocs.yml` + `site_docs/`), deployed to GitHub
