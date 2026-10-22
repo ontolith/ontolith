@@ -356,3 +356,33 @@ class TestHasConcept:
 
     def test_unknown_concept_is_false(self) -> None:
         assert self._schema().has_concept("Vehicle") is False
+
+
+class TestTargetConceptOf:
+    """SchemaIR.target_concept_of() — relation target concept lookup (KI-112)."""
+
+    def _schema(self) -> SchemaIR:
+        return SchemaIR(
+            namespace="test",
+            version=1,
+            concepts={
+                "Person": ConceptDef(
+                    name="Person",
+                    properties={"name": PropertyDef(name="name", value_type="Text")},
+                    relations={
+                        "employer": RelationDef(name="employer", target_concept="Organization")
+                    },
+                ),
+                "Organization": ConceptDef(name="Organization"),
+            },
+        )
+
+    def test_relation_returns_declared_target(self) -> None:
+        assert self._schema().target_concept_of("Person.employer") == "Organization"
+
+    def test_property_returns_none(self) -> None:
+        assert self._schema().target_concept_of("Person.name") is None
+
+    def test_unknown_predicate_returns_none(self) -> None:
+        assert self._schema().target_concept_of("Person.missing") is None
+        assert self._schema().target_concept_of("Vehicle.owner") is None

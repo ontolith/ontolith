@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `SchemaIR.target_concept_of(predicate)` returns a relation's declared
+  target concept, or `None` for a property or unknown predicate.
 - Full documentation site (`mkdocs.yml` + `site_docs/`), deployed to GitHub
   Pages: Getting Started, Concepts, four tutorials (Governance & Review,
   Bitemporal Queries, Writing a Plugin, Hybrid Search), an Examples index,
@@ -27,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently.
 
 ### Fixed
+- `Ontology.assert_ref()`, `propose_ref()` and proposal replay now reject a
+  relation target whose entity is not of the relation's declared target
+  concept, raising `ValidationError` (KI-112). **Behaviour change:** a
+  reference write that previously succeeded against the wrong concept now
+  fails. Existing rows are untouched.
 - `pyproject.toml`'s `Documentation` URL pointed at an unreachable
   readthedocs.io page that was never deployed; now points at the new
   GitHub Pages site.
