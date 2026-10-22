@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - A benchmark for extending an open contradiction (`tests/benchmarks/
   test_contradiction_extension.py`, KI-100). Informational, not a budget gate.
+- `RelationDef.target`, a read-only alias for `target_concept` that matches
+  the class DSL's `Ref["X"]` wording.
 - `SchemaIR.target_concept_of(predicate)` returns a relation's declared
   target concept, or `None` for a property or unknown predicate.
 - Full documentation site (`mkdocs.yml` + `site_docs/`), deployed to GitHub
