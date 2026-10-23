@@ -1,8 +1,8 @@
 """Conformance vectors for contradiction resolution (SPEC §10.3, §19).
 
 Ontology.resolve_contradiction() lets a reviewer pick a winning assertion
-among an open contradiction's flagged members. Losers are retracted, the
-winner is reactivated, and the contradiction transitions to 'resolved'.
+among an open contradiction's flagged members. Members with a different
+value are retracted, members with the winner's value stay active (ADR-0053), and the contradiction transitions to 'resolved'.
 Resolution is append-only: only status/state fields mutate, nothing is deleted.
 """
 

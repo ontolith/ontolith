@@ -890,8 +890,8 @@ def resolve_contradiction(
     ],
 ) -> None:
     """Resolve an open contradiction by selecting a winning assertion
-    (SPEC §10.3). Every other member is retracted; the winner is
-    reactivated. Requires `review` (or `admin`) capability, non-AI, and
+    (SPEC §10.4). Members with the winner's value stay active; members
+    with a different value are retracted. Requires `review` (or `admin`) capability, non-AI, and
     not a party to the contradiction (KI-026).
     """
     kb = _kb()

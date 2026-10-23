@@ -3035,10 +3035,13 @@ class Ontology:
         winner_assertion_id: str,
         resolver: str,
     ) -> Contradiction:
-        """Resolve an open contradiction by selecting a winning assertion (SPEC §10.3).
+        """Resolve an open contradiction by selecting a winning assertion (SPEC §10.4).
 
-        All other member assertions are retracted; the winning assertion is
-        reactivated. The resolver must have `review` or `admin` capability
+        Resolution is by winning value (ADR-0053): every non-terminal member
+        whose value equals the winner's is kept active (SPEC §10.1
+        corroboration), and every non-terminal member with a different
+        value is retracted. Members already `retracted`/`superseded` are
+        left untouched. The resolver must have `review` or `admin` capability
         and must not be an AI principal (ThresholdPolicy always routes AI
         proposals to require_review; an AI resolver would let it approve
         its own or another AI's disputed value unsupervised). The resolver
@@ -3152,35 +3155,35 @@ class Ontology:
                     f"{contradiction_id!r} — retraction/supersession is terminal"
                 )
 
+            # ADR-0053: resolution is by winning value. A member whose
+            # (value_kind, value) equals the winner's corroborates it
+            # (SPEC §10.1) and is kept; only differing members are
+            # retracted. Same value comparison conflict routing uses, plus
+            # `value_kind` (a predicate is either a property or a relation,
+            # so the two agree in practice).
+            winning_key = (winner.value_kind, winner.value)
             for member_id in contradiction.member_ids:
-                if member_id != winner_assertion_id:
-                    # A loser already `retracted` (KI-034 — e.g. a neutral
-                    # third party's own earlier retract()) or `superseded`
-                    # (ADR-0031 — e.g. named via flag_contradiction(), which
-                    # accepts a superseded assertion by design) needs no
-                    # further write: re-retracting a retracted loser is a
-                    # no-op status-wise, and overwriting a superseded loser
-                    # to `retracted` here would misattribute this specific
-                    # transition to the resolver, who did nothing to cause
-                    # it — this loop's skip is about *attribution* for an
-                    # automatic side effect of picking a winner, not (as an
-                    # earlier version of this comment overstated) permanently
-                    # erasing supersession from the record: the event log
-                    # only ever appends, so a *user-targeted* superseded ->
-                    # retracted transition elsewhere (e.g. an explicit
-                    # retract() call, KI-051 — deliberately NOT given this
-                    # same skip, see that method's own comment) still leaves
-                    # both events in the trail with their own actors.
-                    loser = self.backend.get_assertion(member_id)
-                    assert loser is not None  # already resolved via the loop above
-                    if loser.status in ("retracted", "superseded"):
-                        continue
+                member = self.backend.get_assertion(member_id)
+                assert member is not None  # already resolved via the loop above
+                # A member already `retracted` (KI-034 — e.g. a neutral
+                # third party's own earlier retract()) or `superseded`
+                # (ADR-0031 — e.g. named via flag_contradiction(), which
+                # accepts a superseded assertion by design) is terminal
+                # whichever group it falls in: it needs no further write,
+                # and overwriting it here would misattribute a transition
+                # to the resolver, who did nothing to cause it. This is
+                # about attribution for an automatic side effect, not
+                # erasing the record: the event log only ever appends.
+                if member.status in ("retracted", "superseded"):
+                    continue
+                if (member.value_kind, member.value) == winning_key:
+                    self.backend.set_assertion_status(member_id, "active")
+                    self._record_assertion_event(member_id, resolver, "reactivated", now)
+                else:
                     self.backend.set_assertion_status(
                         member_id, "retracted", valid_to=self._retraction_valid_to(member_id, now)
                     )
                     self._record_assertion_event(member_id, resolver, "retracted", now)
-            self.backend.set_assertion_status(winner_assertion_id, "active")
-            self._record_assertion_event(winner_assertion_id, resolver, "reactivated", now)
             self.backend.resolve_contradiction(contradiction_id, resolver, now)
 
         resolved = self.backend.get_contradiction(contradiction_id)
