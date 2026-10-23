@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently.
 
 ### Fixed
+- **Breaking:** `resolve_contradiction` now resolves by winning value
+  (ADR-0053, KI-113). Members whose value equals the winner's stay active
+  instead of being retracted; only members with a different value are
+  retracted. Retracted and superseded members are unchanged. A resolution
+  that previously left one active assertion can now leave several.
 - `Ontology.assert_ref()`, `propose_ref()` and proposal replay now reject a
   relation target whose entity is not of the relation's declared target
   concept, raising `ValidationError` (KI-112). **Behaviour change:** a
