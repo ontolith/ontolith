@@ -358,15 +358,17 @@ def contradict(members):
 A flagged assertion is **retained and queryable** but **MUST** be excluded from default (unflagged) retrieval unless explicitly requested. Static facts are **never silently overwritten**.
 
 ### 10.4 Resolution
-A `review`-capable principal resolves a contradiction by selecting a winner (or asserting a new value):
+A `review`-capable principal resolves a contradiction by selecting a winner (or asserting a new value). Resolution is by the winner's **value**: members that corroborate it (§10.1) are kept, and only members that disagree are retracted (ADR-0053):
 ```
 def resolve(c, winner_id, by):
-    for m in c.members where m.id != winner_id:
-        m.status = "retracted"
-    winner.status = "active"
+    for m in c.members where m.status not in ("retracted", "superseded"):
+        if (m.value_kind, m.value) == (winner.value_kind, winner.value):
+            m.status = "active"           # the winner and any corroborating member
+        else:
+            m.status = "retracted"
     c.state = "resolved"; c.resolved_by = by; c.resolved_at = now()
 ```
-Resolution events **MUST** appear in provenance.
+Members already `retracted` or `superseded` are terminal and are left unchanged. Resolution events, including which members were kept and which were retracted, **MUST** appear in provenance.
 
 ---
 
