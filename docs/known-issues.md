@@ -2413,6 +2413,22 @@ Known residuals, deliberately not closed here: (a) the concept is compared by na
 
 ---
 
+## KI-113 — `resolve_contradiction` retracted members that corroborated the winner ✓ RESOLVED (Backlog)
+
+**Severity:** Bug — resolving a contradiction discarded a second source that agreed with the winning value
+**Milestone target:** Backlog — resolved without a milestone change
+**SPEC reference:** SPEC §10.1 (corroboration: keep both), §10.4 (resolution); ADR-0053
+
+### Description
+
+Contradiction membership is not pairwise: a differing value flags every overlapping active assertion on `(subject, predicate)`, including ones that agree with each other. `resolve_contradiction` retracted every member except the chosen winner, so with values `100` (A), `100` (B) and `120` (C), resolving for A's `100` retracted B although it agreed with the winner. §10.4's pseudocode described exactly that behavior, so the defect was in the SPEC text as well as the code.
+
+### Fix
+
+Resolution is now by winning value (ADR-0053): non-terminal members equal to the winner's `(value_kind, value)` stay or become `active` and get a `reactivated` event; non-terminal members with a different value are retracted. Retracted and superseded members stay terminal (ADR-0031). Equality is conflict routing's exact value comparison, plus `value_kind`. The party guard (KI-026) is unchanged and still checks every member. No signature change and no storage migration. Behavior change: queries after resolution can now return more than one active assertion for the same `(subject, predicate)`, as corroboration already does outside a contradiction. Resolutions made before this change are left as recorded; a reviewer who wants only one assertion kept can retract the others with `retract()`.
+
+---
+
 ## Format
 
 Each entry follows this structure:

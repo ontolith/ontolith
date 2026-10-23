@@ -1,6 +1,6 @@
 # ADR-0053: Contradiction Resolution Keeps Members That Corroborate the Winner
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-10-22
 **Deciders**: Ontolith Core Team
 **Related**: SPEC §10.1 (corroboration: keep both), SPEC §10.3, SPEC §10.4 (resolution), ADR-0019 (SemVer policy), ADR-0031 (retracted/superseded are terminal for winner selection), KI-034
@@ -33,7 +33,7 @@ Resolution is by **winning value**, not by winning assertion.
 1. Every member whose `(value_kind, value)` equals the winner's is kept: a `flagged` one becomes `active`, and each gets a `reactivated` assertion event attributed to the resolver. The chosen winner is simply one of these.
 2. Every member with a different `(value_kind, value)` is retracted, as today.
 3. Members already `retracted` or `superseded` stay as they are, whichever group they fall in. ADR-0031 still applies: terminal means terminal, and they are never reactivated or overwritten.
-4. Equality is the exact comparison conflict routing already uses (`e.value != V`). It is deliberately *not* canonicalized here: routing and resolution must agree on what "same value" means, so the members the router treated as corroborating are exactly the ones resolution keeps. Canonicalization, if wanted, is a separate decision that has to change both.
+4. Equality is the same exact value comparison conflict routing already uses (`e.value != V`), plus `value_kind`; a predicate is either a property or a relation, so the two agree in practice. It is deliberately *not* canonicalized here: routing and resolution must agree on what "same value" means, so the members the router treated as corroborating are exactly the ones resolution keeps. Canonicalization, if wanted, is a separate decision that has to change both.
 5. This is the **default behavior**, with no new parameter. `resolve_contradiction()`'s signature and return type are unchanged.
 6. The resolution record needs no new column. Which members were kept and which were retracted is already in provenance as the per-member `reactivated` / `retracted` events written in the same transaction at the same timestamp. The `Contradiction` row keeps `resolved_by` / `resolved_at`. No storage migration and no `format_version` bump.
 
