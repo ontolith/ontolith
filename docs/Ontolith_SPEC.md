@@ -322,6 +322,11 @@ elif t == "static":
         activate(A)                                # corroboration: keep both, do NOT merge confidence
 ```
 
+Before routing, an incoming assertion identical to an existing `active` or `flagged` one on
+`(subject, predicate, value_kind, value, author, acting_as, source, valid_from, valid_to)` is not written;
+the existing assertion is returned (ADR-0054). Corroboration therefore counts distinct sources or authors,
+not repeated writes. Retracted and superseded assertions never absorb a repeat.
+
 > **Implementation deviation, recorded in ADR-0017 and ADR-0050.** The routing above is silent on
 > `PropertyDef.cardinality` (`"single"` | `"many"`, schema-declared, default `"single"`). The
 > shipped implementation (`govern/conflict.route()`) adds it as a second axis: for `static`,
