@@ -27,8 +27,16 @@ A new public method stages several operations as **one proposal**, accepted or r
 kb.propose_batch(
     [
         CreateEntityOp(key="d1", concept="Decision"),
-        AssertLiteralOp(subject=LocalRef("d1"), predicate="Decision.title", value="...", value_type="Text", source="..."),
-        AssertRefOp(subject=LocalRef("d1"), predicate="Decision.owner", target=person_id, source="..."),
+        AssertLiteralOp(
+            subject=LocalRef("d1"),
+            predicate="Decision.title",
+            value="...",
+            value_type="Text",
+            source="...",
+        ),
+        AssertRefOp(
+            subject=LocalRef("d1"), predicate="Decision.owner", target=person_id, source="..."
+        ),
     ],
     author="...",
 )  # -> tuple[Proposal, Decision]
