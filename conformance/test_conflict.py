@@ -206,8 +206,10 @@ class TestStaticContradiction:
     def test_corroborating_assertion_both_active(self, make_kb: KbFactory) -> None:
         kb = _kb(make_kb)
         entity = kb.create_entity("Person", author=AUTHOR)
-        kb.propose(entity.id, "Person.name", "Ada", "Text", AUTHOR)
-        kb.propose(entity.id, "Person.name", "Ada", "Text", AUTHOR)
+        # A different source is what makes the second write corroboration;
+        # an identical repeat is a no-op (ADR-0054).
+        kb.propose(entity.id, "Person.name", "Ada", "Text", AUTHOR, source="src-a")
+        kb.propose(entity.id, "Person.name", "Ada", "Text", AUTHOR, source="src-b")
         active = kb.assertions(subject=entity.id, predicate="Person.name", status="active")
         assert len(active) == 2  # corroboration: both retained
 

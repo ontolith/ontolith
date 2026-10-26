@@ -169,8 +169,9 @@ class TestExplicitFlagEvents:
         kb = _kb(make_kb)
         entity = kb.create_entity("Person", author=AUTHOR)
         kb.assert_literal(entity.id, "Person.born", "1815", "Text", AUTHOR)
-        a = kb.assert_ref(entity.id, "Person.employer", entity.id, AUTHOR)
-        b = kb.assert_ref(entity.id, "Person.employer", entity.id, AUTHOR)
+        # Distinct sources: an identical repeat would be a no-op (ADR-0054).
+        a = kb.assert_ref(entity.id, "Person.employer", entity.id, AUTHOR, source="src-a")
+        b = kb.assert_ref(entity.id, "Person.employer", entity.id, AUTHOR, source="src-b")
 
         kb.flag_contradiction(a.id, b.id, REVIEWER)
 
