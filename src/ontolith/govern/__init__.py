@@ -19,6 +19,14 @@ but unreachable from this package.
 
 from ontolith.govern.conflict import Activate, ConflictResult, Contradict, Supersede, route
 from ontolith.govern.contradiction import Contradiction, ContradictionState, safe_rationale_history
+from ontolith.govern.operations import (
+    MAX_BATCH_OPERATIONS,
+    AssertLiteralOp,
+    AssertRefOp,
+    BatchOp,
+    CreateEntityOp,
+    LocalRef,
+)
 from ontolith.govern.policy import (
     AutoAccept,
     Composite,
@@ -63,4 +71,10 @@ __all__ = [
     "Contradict",
     "ConflictResult",
     "route",
+    "BatchOp",
+    "CreateEntityOp",
+    "AssertLiteralOp",
+    "AssertRefOp",
+    "LocalRef",
+    "MAX_BATCH_OPERATIONS",
 ]

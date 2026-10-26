@@ -210,8 +210,9 @@ class SourceQuorum:
     Retractions and sourceless proposals always require review: a
     retraction isn't a corroborable fact, and a quorum can't be established
     without knowing the proposing source. Only the proposal's first staged
-    operation is inspected — every current caller (`propose`/`propose_ref`/
-    `retract`) stages exactly one.
+    operation is inspected; `Ontology` calls it once per operation of a
+    multi-operation proposal (ADR-0055), each time with a single-operation
+    view. A `create_entity` operation requires review.
 
     Does not special-case AI-authored proposals: ``ThresholdPolicy``'s
     "AI always requires review" rule (ADR-0003) is that strategy's own
@@ -322,8 +323,9 @@ class ConfidenceThreshold:
     the same reason ``SourceQuorum`` does: a retraction carries no
     confidence value at all (``Ontology.retract``'s payload has no
     ``confidence`` key), so there's nothing here to threshold against. Only
-    the proposal's first staged operation is inspected — every current
-    caller (``propose``/``propose_ref``) stages exactly one.
+    the proposal's first staged operation is inspected; `Ontology` calls it once per operation of a
+    multi-operation proposal (ADR-0055), each time with a single-operation
+    view. A ``create_entity`` operation requires review.
 
     Rejects principals without at least ``propose`` capability, mirroring
     ``SourceQuorum``'s own KI-015 floor enforcement — this floor is not
@@ -728,8 +730,18 @@ def _most_restrictive(decisions: list[Decision]) -> Decision:
     if rejects:
         return _merge_reject(rejects)
     reviews = [d for d in decisions if isinstance(d, RequireReview)]
-    if reviews:
-        return _merge_require_review(reviews)
+    # A Decision that is none of the three shipped types is not an accept:
+    # treat it as requiring review rather than dropping it, so it can only
+    # make the group stricter (a custom strategy's own subclass must never
+    # fail open into AutoAccept).
+    unknown = [d for d in decisions if not isinstance(d, AutoAccept | RequireReview | Reject)]
+    if reviews or unknown:
+        return _merge_require_review(
+            [
+                *reviews,
+                *(RequireReview([], f"Unrecognized decision {type(d).__name__}") for d in unknown),
+            ]
+        )
     accepts = [d for d in decisions if isinstance(d, AutoAccept)]
     return _merge_auto_accept(accepts)
 
