@@ -240,7 +240,7 @@ def test_resolution_is_by_winning_value(
     entity = kb.create_entity("Person", author=SRC_A).id
     sources = (SRC_A, SRC_B, SRC_C)
     ids = [
-        kb.assert_literal(entity, PREDICATE, v, "Text", sources[i % 3]).id
+        kb.assert_literal(entity, PREDICATE, v, "Text", sources[i % 3], source=f"s{i}").id
         for i, v in enumerate(values)
     ]
     contradiction = kb.backend.get_open_contradiction("default", entity, PREDICATE)

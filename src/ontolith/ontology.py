@@ -1095,7 +1095,13 @@ class Ontology:
                 already unambiguous there without a hint.
 
         Returns:
-            Assertion as persisted (status/supersedes reflect conflict routing)
+            Assertion as persisted (status/supersedes reflect conflict routing).
+            If an identical assertion (same subject, predicate, value,
+            author, delegate, source and validity window) is already
+            `active` or `flagged`, nothing is written and that existing
+            assertion is returned unchanged — a differing confidence,
+            rationale or model on the repeat is dropped (ADR-0054). A
+            write that passes `supersedes` is never treated as a repeat.
 
         Raises:
             NotFoundError: subject is not a known entity id (KI-083)
@@ -1184,7 +1190,13 @@ class Ontology:
                 temporality="time_varying" relation.
 
         Returns:
-            Assertion as persisted (status/supersedes reflect conflict routing)
+            Assertion as persisted (status/supersedes reflect conflict routing).
+            If an identical assertion (same subject, predicate, value,
+            author, delegate, source and validity window) is already
+            `active` or `flagged`, nothing is written and that existing
+            assertion is returned unchanged — a differing confidence,
+            rationale or model on the repeat is dropped (ADR-0054). A
+            write that passes `supersedes` is never treated as a repeat.
 
         Raises:
             NotFoundError: subject or target is not a known entity id
@@ -2078,6 +2090,42 @@ class Ontology:
                 self._record_assertion_event(assertion_id, author, "retracted", now)
         return accepted, decision
 
+    def _find_identical_assertion(self, incoming: Assertion) -> Assertion | None:
+        """Return an existing `active` or `flagged` assertion identical to
+        `incoming` (ADR-0054), or None.
+
+        Identical means equal on (subject, predicate, value_kind, value,
+        author, acting_as, source, valid_from, valid_to) — confidence,
+        rationale and model are deliberately not part of the key. A
+        `retracted` or `superseded` assertion never matches, so re-asserting
+        after a retraction still lands. Must run inside the write
+        transaction so two concurrent identical writes cannot both miss.
+
+        `valid_from` defaults to `asserted_at`, so an incoming assertion
+        whose `valid_from` equals its own `asserted_at` is treated as
+        "unspecified" and matches a candidate whose `valid_from` was also
+        defaulted; an explicit `valid_from` must match exactly.
+        """
+        window_defaulted = incoming.valid_from == incoming.asserted_at
+        for status in ("active", "flagged"):
+            for candidate in self.backend.assertions(
+                subject=incoming.subject, predicate=incoming.predicate, status=status
+            ):
+                if (
+                    candidate.value_kind == incoming.value_kind
+                    and candidate.value == incoming.value
+                    and candidate.author == incoming.author
+                    and candidate.acting_as == incoming.acting_as
+                    and candidate.source == incoming.source
+                    and candidate.valid_to == incoming.valid_to
+                    and (
+                        candidate.valid_from == incoming.valid_from
+                        or (window_defaulted and candidate.valid_from == candidate.asserted_at)
+                    )
+                ):
+                    return candidate
+        return None
+
     def _apply_with_conflict_routing(
         self,
         assertion: Assertion,
@@ -2088,6 +2136,8 @@ class Ontology:
 
         Returns the assertion as actually persisted (its ``status``/``supersedes``
         may differ from the input, e.g. when routing flags or supersedes it).
+        An assertion identical to an existing ``active``/``flagged`` one is
+        not written: that existing assertion is returned (ADR-0054).
 
         ``supersedes`` (ADR-0050): caller-supplied hint naming a specific
         existing assertion this one explicitly replaces, meaningful only
@@ -2099,6 +2149,13 @@ class Ontology:
         where the pure ``govern.conflict`` layer's contract violations
         cross into caller-facing error codes.
         """
+        # A write naming a `supersedes` hint (ADR-0050) asks for a specific
+        # replacement, so it is never absorbed as a repeat (ADR-0054).
+        if supersedes is None:
+            identical = self._find_identical_assertion(assertion)
+            if identical is not None:
+                return identical
+
         open_contradiction = self.backend.get_open_contradiction(
             self.namespace, assertion.subject, assertion.predicate
         )

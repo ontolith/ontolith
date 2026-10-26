@@ -1562,8 +1562,8 @@ class TestFlagContradictionTOCTOU:
         # Same target value on both refs -> corroboration, not conflict, so
         # both start out `active` and independent of each other (matches
         # test_explicit_flag_records_flagging_principal's own setup above).
-        a = kb.assert_ref(entity.id, "Person.employer", entity.id, HUMAN_WRITE)
-        b = kb.assert_ref(entity.id, "Person.employer", entity.id, HUMAN_WRITE)
+        a = kb.assert_ref(entity.id, "Person.employer", entity.id, HUMAN_WRITE, source="src-a")
+        b = kb.assert_ref(entity.id, "Person.employer", entity.id, HUMAN_WRITE, source="src-b")
 
         def racer() -> None:
             kb.retract(a.id, HUMAN_WRITE)
