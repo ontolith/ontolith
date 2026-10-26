@@ -4,6 +4,7 @@ Where humans and AI agents are co-equal authors of a shared, governed ontology.
 """
 
 from ontolith.core import Assertion, Entity, FixedClock, Namespace, SequentialIdProvider
+from ontolith.govern import AssertLiteralOp, AssertRefOp, CreateEntityOp, LocalRef
 from ontolith.identity import Principal
 from ontolith.ontology import AsOfView, Ontology
 from ontolith.schema import (
@@ -30,6 +31,10 @@ __all__ = [
     "Assertion",
     "Namespace",
     "Principal",
+    "CreateEntityOp",
+    "AssertLiteralOp",
+    "AssertRefOp",
+    "LocalRef",
     "FixedClock",
     "SequentialIdProvider",
     "Concept",

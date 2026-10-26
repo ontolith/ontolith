@@ -35,6 +35,14 @@ from ontolith.core.errors import (
 from ontolith.govern import AutoAccept, ThresholdPolicy
 from ontolith.govern.conflict import ConflictResult, Contradict, Supersede, route
 from ontolith.govern.contradiction import Contradiction, safe_rationale_history
+from ontolith.govern.operations import (
+    MAX_BATCH_OPERATIONS,
+    AssertLiteralOp,
+    AssertRefOp,
+    BatchOp,
+    CreateEntityOp,
+    LocalRef,
+)
 from ontolith.govern.policy import Decision, PolicyStrategy, Reject, RequireReview
 from ontolith.govern.proposal import Proposal, ProposalEvent
 from ontolith.govern.provenance import Provenance
@@ -70,6 +78,42 @@ def _value_for_error(value: str) -> str:
     if len(value) <= _MAX_VALUE_IN_ERROR:
         return repr(value)
     return f"{value[:_MAX_VALUE_IN_ERROR]!r}... ({len(value)} chars total)"
+
+
+def _strictest_decision(decisions: Sequence[Decision]) -> Decision:
+    """Combine per-operation policy decisions into one (ADR-0055 §2): any
+    `Reject` wins (its first reason is reported), else any non-accepting
+    decision requires review (reviewers unioned in first-seen order, reasons
+    joined), else `AutoAccept`.
+
+    A `Decision` that is none of the three shipped types is treated as
+    requiring review, never as an accept, so an unrecognized outcome can
+    only make a batch stricter.
+    """
+    for d in decisions:
+        if isinstance(d, Reject):
+            return d
+    reviews = [d for d in decisions if not isinstance(d, AutoAccept)]
+    if reviews:
+        reviewers: list[str] = []
+        for d in reviews:
+            raw = getattr(d, "reviewers", None)
+            # Same guard as _finalize_non_accepted_decision: a bare string
+            # must not be split into letters.
+            for r in raw if isinstance(raw, list) else []:
+                if isinstance(r, str) and r not in reviewers:
+                    reviewers.append(r)
+        reasons = dict.fromkeys(str(getattr(d, "reason", "")) for d in reviews)
+        return RequireReview(reviewers, "; ".join(r for r in reasons if r))
+    accepts = dict.fromkeys(d.reason for d in decisions if isinstance(d, AutoAccept))
+    return AutoAccept("; ".join(r for r in accepts if r) or "Policy approved")
+
+
+def _local_sentinel(key: str) -> str:
+    """Placeholder id a per-operation policy view shows for a not-yet-created
+    entity: matches no real entity, so a KB-reading strategy sees no
+    existing assertions for it (ADR-0055 §2)."""
+    return f"\x00local:{key}"
 
 
 def _reject_json_constant(token: str) -> NoReturn:
@@ -1706,6 +1750,281 @@ class Ontology:
             self._apply_with_conflict_routing(assertion, temporality, supersedes)
         return accepted, decision
 
+    def propose_batch(
+        self,
+        ops: Sequence[BatchOp],
+        author: str,
+        *,
+        acting_as: str | None = None,
+        model: str | None = None,
+    ) -> tuple[Proposal, Decision]:
+        """Submit several operations as ONE proposal, accepted or rejected
+        atomically (SPEC §9.5, ADR-0055).
+
+        Operations are `CreateEntityOp`, `AssertLiteralOp` and `AssertRefOp`.
+        A `CreateEntityOp` names a new entity with a local `key`; later
+        operations refer to it with `LocalRef(key)` as their `subject` or
+        `target`. A key must be declared by an earlier operation and be unique
+        in the batch. The new entity's real id is allocated from the injected
+        `IdProvider` when the proposal is accepted, never at submission, so a
+        rejected batch reserves none.
+
+        ``self.policy`` is evaluated once per operation, each time against a
+        view of the proposal holding only that operation, and the strictest
+        outcome wins (Reject, then RequireReview, then AutoAccept; reviewer
+        sets are unioned). A `create_entity` operation carries no confidence
+        or source, like a `retract` operation: the shipped content-reading
+        policies (`SourceQuorum`, `ConfidenceThreshold`, `SourceRequired`)
+        send it to review.
+
+        On auto-accept every operation is applied in one transaction through
+        SPEC §10 conflict routing and idempotent re-assertion (ADR-0054); any
+        failure rolls back the whole batch, new entities included. The ids of
+        the entities created are in ``proposal.metadata["created_entities"]``
+        (local key to id). For a batch accepted later by a reviewer they are
+        in the `accept` event's `detail` as JSON.
+
+        ``model`` is REQUIRED when ``author`` is an ``ai``-kind principal and
+        is recorded on every assertion of the batch. Retraction is not
+        supported inside a batch.
+
+        Args:
+            ops: 1 to 100 operations, in application order
+            author: Principal ID proposing the batch
+            acting_as: Delegating principal (ADR-0003)
+            model: AI model family+version
+
+        Returns:
+            (Proposal, Decision) tuple
+
+        Raises:
+            AuthError: author or acting_as is not a known principal
+            CapabilityError: delegation is unauthorized
+            NotFoundError: a real subject or target is not a known entity id
+            ValidationError: ops is empty or over 100; a key is duplicated,
+                or a `LocalRef` names no earlier `CreateEntityOp`; a concept
+                or predicate is unknown, a `value_type`, predicate kind or
+                relation target concept does not match the schema; a
+                `natural_key` is taken or repeated; `model` is missing for an
+                AI author; a `supersedes` hint is misplaced (ADR-0050); or
+                (on auto-accept) a registered `Validator` rejects an
+                assertion
+        """
+        principal = self._get_principal_or_raise(author)
+        self._require_model_for_ai(principal, model)
+        self._validate_batch_ops(ops)
+        delegating = self._resolve_delegation(principal, author, acting_as)
+
+        operations = [self._batch_op_payload(op, model) for op in ops]
+        now = self.clock.now()
+        proposal = Proposal(
+            id=self.id_provider.next(),
+            namespace=self.namespace,
+            author=author,
+            acting_as=acting_as,
+            state="submitted",
+            created_at=now,
+            payload={"operations": operations},
+        )
+
+        kb_view = self.as_of(now)
+        decision = self._evaluate_policy(proposal, principal, kb_view, delegating)
+        finalized = self._finalize_non_accepted_decision(proposal, decision, now)
+        if finalized is not None:
+            return finalized
+        assert isinstance(decision, AutoAccept)
+
+        with self.backend.transaction():
+            created = {
+                op["key"]: self.id_provider.next()
+                for op in operations
+                if op["kind"] == "create_entity"
+            }
+            accepted = proposal.model_copy(
+                update={
+                    "state": "auto_accepted",
+                    "decided_at": now,
+                    "policy_reason": decision.reason,
+                    "metadata": {"created_entities": dict(created)} if created else {},
+                }
+            )
+            self.backend.put_proposal(accepted)
+            self._replay_proposal_operations(accepted, now, created_entities=created)
+        return accepted, decision
+
+    def _validate_batch_ops(self, ops: Sequence[BatchOp]) -> None:
+        """Submit-time checks for `propose_batch` (ADR-0055 §1): the same
+        ones each operation's single-operation counterpart runs, plus the
+        local-key rules."""
+        if not ops:
+            raise ValidationError("A batch needs at least one operation")
+        if len(ops) > MAX_BATCH_OPERATIONS:
+            raise ValidationError(
+                f"A batch holds at most {MAX_BATCH_OPERATIONS} operations; got {len(ops)}"
+            )
+        local_concepts: dict[str, str] = {}
+        natural_keys: set[tuple[str, str]] = set()
+        for op in ops:
+            if isinstance(op, CreateEntityOp):
+                if op.key in local_concepts:
+                    raise ValidationError(f"Duplicate local key {op.key!r} in batch")
+                self._require_known_concept(op.concept)
+                if op.natural_key is not None:
+                    if (op.concept, op.natural_key) in natural_keys:
+                        raise ValidationError(
+                            f"Entity conflict: {op.concept!r} with natural_key="
+                            f"{op.natural_key!r} is created twice in this batch"
+                        )
+                    natural_keys.add((op.concept, op.natural_key))
+                    self._require_unique_natural_key(op.concept, op.natural_key)
+                local_concepts[op.key] = op.concept
+            elif isinstance(op, AssertLiteralOp):
+                self._require_batch_subject(op.subject, local_concepts)
+                self._require_known_predicate(
+                    op.predicate, op.value_type, op.value, expected_kind="property"
+                )
+                self._require_valid_supersedes_hint(
+                    op.supersedes, op.predicate, self._resolve_temporality(op.predicate)
+                )
+            elif isinstance(op, AssertRefOp):
+                self._require_batch_subject(op.subject, local_concepts)
+                self._require_known_predicate(op.predicate, expected_kind="relation")
+                if isinstance(op.target, LocalRef):
+                    self._require_declared_key(op.target, local_concepts)
+                    self._require_batch_target_concept(
+                        op.predicate, op.target, local_concepts[op.target.key]
+                    )
+                else:
+                    self._require_existing_target(op.target)
+                    self._require_target_concept(op.predicate, op.target)
+                self._require_valid_supersedes_hint(
+                    op.supersedes, op.predicate, self._resolve_temporality(op.predicate)
+                )
+            else:
+                raise ValidationError(f"Unsupported batch operation: {type(op).__name__}")
+
+    @staticmethod
+    def _require_declared_key(ref: LocalRef, local_concepts: dict[str, str]) -> None:
+        if ref.key not in local_concepts:
+            raise ValidationError(
+                f"Local key {ref.key!r} is not declared by an earlier create-entity "
+                "operation in this batch"
+            )
+
+    def _require_batch_subject(
+        self, subject: str | LocalRef, local_concepts: dict[str, str]
+    ) -> None:
+        if isinstance(subject, LocalRef):
+            self._require_declared_key(subject, local_concepts)
+        else:
+            self._require_existing_subject(subject)
+
+    def _require_batch_target_concept(self, predicate: str, ref: LocalRef, concept: str) -> None:
+        """`_require_target_concept` for a target that is a new entity of
+        `concept` in the same batch (it has no id to look up yet)."""
+        schema = self.backend.get_schema(self.namespace)
+        if schema is None:
+            return
+        expected = schema.target_concept_of(predicate)
+        if expected is not None and expected != concept:
+            raise ValidationError(
+                f"Relation {predicate!r} targets concept {expected!r}, but "
+                f"local key {ref.key!r} is a {concept!r}"
+            )
+
+    def _batch_op_payload(self, op: BatchOp, model: str | None) -> dict[str, Any]:
+        """The stored payload form of one batch operation. A `LocalRef`
+        endpoint is stored as `<field>: None` plus `<field>_key`."""
+
+        def endpoint(field: str, value: str | LocalRef) -> dict[str, Any]:
+            if isinstance(value, LocalRef):
+                return {field: None, f"{field}_key": value.key}
+            return {field: value}
+
+        def common(op: AssertLiteralOp | AssertRefOp) -> dict[str, Any]:
+            return {
+                "temporality": self._resolve_temporality(op.predicate),
+                "confidence": op.confidence,
+                "source": op.source,
+                "rationale": op.rationale,
+                "model": model,
+                "valid_from": op.valid_from.isoformat() if op.valid_from else None,
+                "valid_to": op.valid_to.isoformat() if op.valid_to else None,
+                "supersedes": op.supersedes,
+            }
+
+        if isinstance(op, CreateEntityOp):
+            return {
+                "kind": "create_entity",
+                "key": op.key,
+                "concept": op.concept,
+                "natural_key": op.natural_key,
+            }
+        if isinstance(op, AssertLiteralOp):
+            return {
+                "kind": "assert_literal",
+                **endpoint("subject", op.subject),
+                "predicate": op.predicate,
+                "value": op.value,
+                "value_type": op.value_type,
+                **common(op),
+            }
+        assert isinstance(op, AssertRefOp)
+        return {
+            "kind": "assert_ref",
+            **endpoint("subject", op.subject),
+            "predicate": op.predicate,
+            **endpoint("target", op.target),
+            **common(op),
+        }
+
+    def _evaluate_policy(
+        self,
+        proposal: Proposal,
+        principal: Principal,
+        kb_view: "AsOfView",
+        delegating: Principal | None,
+    ) -> Decision:
+        """Evaluate `self.policy` against every operation of `proposal`
+        (ADR-0055 §2).
+
+        A proposal with one operation is passed to the policy as is. With
+        several, the policy runs once per operation against a copy holding
+        only that operation, and the strictest outcome wins, so a strategy
+        that reads only `operations[0]` cannot be bypassed by a later one.
+        """
+        operations = proposal.payload.get("operations") or []
+        if len(operations) <= 1:
+            return self.policy.evaluate(proposal, principal, kb_view, acting_as=delegating)
+
+        def single_op_view(op: dict[str, Any]) -> Proposal:
+            shown = dict(op)
+            for field in ("subject", "target"):
+                key = op.get(f"{field}_key")
+                if key is not None:
+                    shown[field] = _local_sentinel(key)
+            return proposal.model_copy(
+                update={"payload": {**proposal.payload, "operations": [shown]}}
+            )
+
+        return _strictest_decision(
+            [
+                self.policy.evaluate(single_op_view(op), principal, kb_view, acting_as=delegating)
+                for op in operations
+            ]
+        )
+
+    @staticmethod
+    def _op_endpoint(op: dict[str, Any], field: str, created: dict[str, str]) -> str:
+        """Resolve an operation's `subject`/`target` to a real entity id,
+        looking a local key up in `created` (ADR-0055)."""
+        key = op.get(f"{field}_key")
+        if key is None:
+            return str(op[field])
+        if key not in created:
+            raise ValidationError(f"Local key {key!r} was not created before it was used")
+        return created[key]
+
     def _reject_retract_if_party_to_contradiction(
         self, assertion_id: str, parties: set[str]
     ) -> None:
@@ -2390,6 +2709,7 @@ class Ontology:
         *,
         extra_retracting_party: str | None = None,
         retracting_principal: tuple[Principal, Principal | None] | None = None,
+        created_entities: dict[str, str] | None = None,
     ) -> list[Assertion]:
         """Apply a proposal's staged operations through SPEC §10 conflict
         routing. Shared by `accept_proposal` and `resubmit` (KI-027) — MUST
@@ -2406,7 +2726,11 @@ class Ontology:
         `propose`/`propose_ref` call already ran them once; re-running them
         at replay time is `resubmit`'s own documented precedent to skip
         (see its docstring), not something this method decides on its own.
-        The one exception is the relation target-concept check
+        For a `create_entity` op (ADR-0055) the concept and natural-key
+        checks do re-run, and a ref op's `LocalRef` endpoints resolve
+        through ``created_entities`` (local key to id; ids pre-filled by
+        the caller are honored, the rest are drawn here and recorded in
+        it). The one other exception is the relation target-concept check
         (`_require_target_concept`, KI-112), which does re-run for each
         `assert_ref` op below, so a proposal staged under an older schema
         version can't land a reference to the wrong concept.
@@ -2469,12 +2793,31 @@ class Ontology:
             assertion as it was before this op retracted it).
         """
         applied: list[Assertion] = []
+        # Local key -> real id for `create_entity` ops (ADR-0055). Ids the
+        # caller pre-allocated are honored; the rest are drawn here, so
+        # they are only ever allocated at accept time.
+        created = created_entities if created_entities is not None else {}
         for op in proposal.payload.get("operations", []):
-            if op["kind"] == "assert_literal":
+            if op["kind"] == "create_entity":
+                self._require_known_concept(op["concept"])
+                self._require_unique_natural_key(op["concept"], op.get("natural_key"))
+                entity_id = created.get(op["key"]) or self.id_provider.next()
+                self.backend.put_entity(
+                    Entity(
+                        id=entity_id,
+                        namespace=self.namespace,
+                        concept=op["concept"],
+                        natural_key=op.get("natural_key"),
+                        created_at=now,
+                        created_by=proposal.author,
+                    )
+                )
+                created[op["key"]] = entity_id
+            elif op["kind"] == "assert_literal":
                 assertion = Assertion(
                     id=self.id_provider.next(),
                     namespace=self.namespace,
-                    subject=op["subject"],
+                    subject=self._op_endpoint(op, "subject", created),
                     predicate=op["predicate"],
                     value_kind="literal",
                     value_type=op["value_type"],
@@ -2499,14 +2842,15 @@ class Ontology:
                     )
                 )
             elif op["kind"] == "assert_ref":
-                self._require_target_concept(op["predicate"], op["target"])
+                target = self._op_endpoint(op, "target", created)
+                self._require_target_concept(op["predicate"], target)
                 ref_assertion = Assertion(
                     id=self.id_provider.next(),
                     namespace=self.namespace,
-                    subject=op["subject"],
+                    subject=self._op_endpoint(op, "subject", created),
                     predicate=op["predicate"],
                     value_kind="ref",
-                    value=op["target"],
+                    value=target,
                     author=proposal.author,
                     acting_as=proposal.acting_as,
                     confidence=op.get("confidence"),
@@ -2634,8 +2978,9 @@ class Ontology:
 
         with self.backend.transaction():
             proposal = self._require_pending_proposal(proposal_id, reviewer)
+            created: dict[str, str] = {}
             applied = self._replay_proposal_operations(
-                proposal, now, extra_retracting_party=reviewer
+                proposal, now, extra_retracting_party=reviewer, created_entities=created
             )
             self._run_completeness_validators(applied)
             self.backend.update_proposal_state(proposal_id, "accepted", now.isoformat())
@@ -2645,6 +2990,11 @@ class Ontology:
                     proposal_id=proposal_id,
                     actor=reviewer,
                     type="accept",
+                    detail=(
+                        json.dumps({"created_entities": created}, sort_keys=True)
+                        if created
+                        else None
+                    ),
                     at=now,
                 )
             )
@@ -2939,7 +3289,7 @@ class Ontology:
         # request_changes decision forward.
         resubmitted = proposal.model_copy(update={"state": "submitted", "decided_at": None})
         kb_view = self.as_of(now)
-        decision = self.policy.evaluate(resubmitted, principal, kb_view, acting_as=delegating)
+        decision = self._evaluate_policy(resubmitted, principal, kb_view, delegating)
         if isinstance(decision, AutoAccept):
             # KI-033/KI-043/ADR-0030: same two checks retract() runs, in
             # the same order, and for the same reason only within the
@@ -2966,6 +3316,7 @@ class Ontology:
             if review_override is not None:
                 decision = review_override
 
+        created: dict[str, str] = {}
         with self.backend.transaction():
             # KI-035: authoritative re-check, fresh, first thing inside the
             # transaction — the checks above (author/state) ran before
@@ -3012,7 +3363,10 @@ class Ontology:
                 # _replay_proposal_operations' docstring) needs principal/
                 # delegating already resolved above, not re-derived.
                 self._replay_proposal_operations(
-                    result, now, retracting_principal=(principal, delegating)
+                    result,
+                    now,
+                    retracting_principal=(principal, delegating),
+                    created_entities=created,
                 )
 
             self.backend.put_proposal_event(
@@ -3021,7 +3375,17 @@ class Ontology:
                     proposal_id=proposal_id,
                     actor=author,
                     type="resubmit",
-                    detail=getattr(decision, "reason", None),
+                    detail=(
+                        json.dumps(
+                            {
+                                "reason": getattr(decision, "reason", None),
+                                "created_entities": created,
+                            },
+                            sort_keys=True,
+                        )
+                        if created
+                        else getattr(decision, "reason", None)
+                    ),
                     at=now,
                 )
             )

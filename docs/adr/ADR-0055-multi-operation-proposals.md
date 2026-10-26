@@ -1,6 +1,6 @@
 # ADR-0055: Multi-Operation Proposals, and AI Entity Creation Through Them
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-10-26
 **Deciders**: Ontolith Core Team
 **Related**: SPEC §9.1-9.2 (proposals, policy), SPEC §14.4 (`ontolith.propose` takes `ops[]`), ADR-0003 (agent identity), ADR-0008 (MCP surface, 2026-09-08 update), ADR-0019 (SemVer policy), ADR-0050 (`supersedes` hint), ADR-0054 (idempotent re-assertion), KI-082, KI-090, KI-091
@@ -15,7 +15,7 @@ Two related gaps.
 
 **AI entity creation bypasses review.** `Ontology.create_entity` only rejects `read`-only principals, so an `ai` principal creates entities directly (ADR-0008's 2026-09-08 update records this as deliberate: an entity is "an identity anchor, not a fact", so there was no policy step). The cost is orphans: when a reviewer rejects the facts an agent proposed about an entity it just created, the empty entity stays behind with no review trail and nothing to remove it.
 
-**A hazard to design around.** Every shipped `PolicyStrategy` reads `proposal.payload["operations"][0]` and ignores the rest. That is harmless while a proposal has one operation. If a proposal can carry several, a low-risk first operation would carry the rest past review. Multi-operation proposals are only safe if policy evaluates every operation.
+**A hazard to design around.** Every shipped content-reading `PolicyStrategy` (`SourceQuorum`, `ConfidenceThreshold`, `SourceRequired`) reads `proposal.payload["operations"][0]` and ignores the rest. That is harmless while a proposal has one operation. If a proposal can carry several, a low-risk first operation would carry the rest past review. Multi-operation proposals are only safe if policy evaluates every operation.
 
 ## Decision
 
@@ -107,3 +107,18 @@ Not chosen: forcing every multi-operation proposal to review (it removes the rev
 - **Always review multi-operation proposals.** Rejected: loses auto-accept for routine, trusted batches.
 - **Remove direct `create_entity` for every principal.** Rejected: breaks the CLI, importers and plugins for no gain, since the orphan problem is specific to untrusted AI authors.
 - **Leave AI creation direct and document the orphans.** Rejected: leaves the review bypass in place.
+
+## Update (2026-10-26): implementation, part 1
+
+`propose_batch`, the typed operations, local keys, accept-time id allocation and the per-operation policy fan-out are implemented. Details the design left open:
+
+- **Created ids.** For an auto-accepted batch the ids of the new entities are returned in `proposal.metadata["created_entities"]` (local key to id). For a batch a reviewer accepts later, they are recorded as JSON in the `accept` proposal event's `detail`; a resubmit that auto-accepts records them in the `resubmit` event's `detail`, as JSON `{"reason": ..., "created_entities": {...}}`. No new storage column.
+- **Payload shape.** A `LocalRef` endpoint is stored as `subject: null` plus `subject_key` (likewise `target`). The per-operation policy view substitutes a placeholder id that matches no entity, so a KB-reading strategy such as `SourceQuorum` finds no existing assertions for a not-yet-created entity.
+- **`create_entity` and the shipped policies.** None raises on it. `SourceQuorum`, `ConfidenceThreshold` and `SourceRequired` route it to review, as they do a retraction, so under those policies any batch that creates an entity goes to review. `ThresholdPolicy` and `RequireReviewForAI` judge it on the author alone.
+- **Replay re-checks** a `create_entity` operation's concept and natural key, and a ref operation's target concept. A real subject or target id is checked at submit only, as for single-operation proposals.
+- **Auto-accept** applies a batch without running completeness validators, like `propose` and `propose_ref`; they run when a reviewer accepts.
+- **A decision that is none of `AutoAccept`/`RequireReview`/`Reject`** is treated as requiring review when combined, in the per-operation fan-out and in `Composite(all=...)`, which previously dropped such a decision and could return an empty `AutoAccept`.
+- **`model` and `acting_as` are batch-level** arguments of `propose_batch`, not fields of the assertion ops (the model is recorded on every assertion of the batch). The operation models reject unknown fields.
+- **Completeness validators** (`RequiredFieldsValidator`) look at the subjects of applied assertions, so an entity created by a batch with no assertion about it is not checked. A batch that creates an entity should assert its required fields.
+
+Part 2 (AI `create_entity`, MCP/REST/GraphQL wiring, ADR-0008 amendment) is still to do.
