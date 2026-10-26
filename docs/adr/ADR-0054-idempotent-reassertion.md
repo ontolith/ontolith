@@ -1,6 +1,6 @@
 # ADR-0054: Re-Asserting an Identical Fact Is a No-Op
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-10-23
 **Deciders**: Ontolith Core Team
 **Related**: SPEC §5 (assertions are append-only), SPEC §10.1 (corroboration), ADR-0019 (SemVer policy), ADR-0053 (resolution keeps corroborating members)
@@ -21,13 +21,14 @@ The consequences are practical:
 
 An incoming assertion that is **identical to an existing one is not written**. The existing assertion is returned.
 
-1. **Match key.** `(namespace, subject, predicate, value_kind, value, author, acting_as, source, valid_from, valid_to)` all equal. Equality is exact, with no canonicalization, consistent with ADR-0053. A different source, author, delegate or validity window is a different fact and is written as today.
+1. **Match key.** `(namespace, subject, predicate, value_kind, value, author, acting_as, source, valid_from, valid_to)` all equal. Equality is exact, with no canonicalization, consistent with ADR-0053. `valid_from` defaults to `asserted_at` (SPEC §5.3), so a repeat that leaves it unspecified is compared as "defaulted": it matches an existing assertion whose `valid_from` was also defaulted, and an explicit `valid_from` must match exactly. Without this a re-import could never match, since its default is a later timestamp. A different source, author, delegate or validity window is a different fact and is written as today.
 2. **Matched statuses.** The existing assertion must be `active` or `flagged`. A `retracted` or `superseded` assertion never absorbs a repeat: re-asserting after a retraction is a deliberate new claim, and it must be able to land.
 3. **Where it runs.** Before conflict routing, inside the same transaction and covering every write path that reaches `_apply_with_conflict_routing` (`assert_literal`, `assert_ref`, proposal acceptance and replay). The match is a fresh read inside the transaction, so two concurrent identical writes cannot both pass it.
 4. **What a repeat returns.** The existing `Assertion`, unchanged. No assertion row, no assertion event, no `valid_to`/`status` change and no routing. If the existing one is `flagged` it is returned as `flagged`, and the open contradiction is not extended.
-5. **Differing confidence or rationale.** Not part of the key and not applied. The repeat is a no-op and the earlier values stand. Assertions are append-only, so a changed belief is a new, distinct assertion (for example with a different source or window), not an edit.
-6. **Proposals.** A proposal whose assertion operation resolves to an existing identical assertion is still accepted and keeps its own proposal events, so the attempt stays in the review trail. It just links to the existing assertion instead of creating one.
-7. **Default behavior, no new parameter.** Signatures and return types do not change.
+5. **Differing confidence, rationale or model.** Not part of the key and not applied. The repeat is a no-op and the earlier values stand. That includes `model`: a repeat from a newer model version leaves the earlier assertion's model on record, which is deliberate, since a changed belief or a new model's independent claim should come in as a distinct assertion (for example with its own source). `value_type` is likewise not in the key; `value_kind` plus `value` identify the claim, and a schema that changes a predicate's `value_type` does not make a repeat new.
+6. **Proposals.** A proposal whose assertion operation matches an existing identical assertion is still accepted and keeps its own proposal events, so the attempt stays in the review trail. No assertion is created and none is linked to that proposal; the earlier assertion keeps pointing at the proposal that introduced it.
+7. **Explicit `supersedes`.** A write that names a `supersedes` hint (ADR-0050) is never treated as a repeat. It asked for a specific replacement, and an invalid hint still raises `ValidationError`.
+8. **Default behavior, no new parameter.** Signatures and return types do not change.
 
 Corroboration by a **different** source or author is unchanged: it is still written, kept alongside the original and surfaced, with confidence never merged.
 
@@ -50,10 +51,10 @@ Corroboration by a **different** source or author is unchanged: it is still writ
 **Negative / follow-ups**
 - **Behavior change.** A repeat used to return a new assertion with a new id; it now returns the earlier one with its original `asserted_at`. Flag `**Breaking:**` in the CHANGELOG and ship in a minor release.
 - Callers that relied on one `asserted_at` per call, or on counting writes by row count, will see differences.
-- A repeat with different confidence or rationale is dropped silently. Documented in the method docstrings.
-- One extra indexed read per write. KI-100's cost note applies; the implementation PR measures it with the existing benchmark.
+- A repeat with different confidence, rationale or model is dropped silently. Documented in the method docstrings.
+- Two extra reads of the `(subject, predicate)` assertions per write (active, then flagged). The existing write benchmarks stay within their §9 budgets with it; KI-100's cost note applies.
 
-**Tests required before implementation merges:** conformance vectors on both backends for the three-repeat scenario on a `static` and a `time_varying` predicate, a `ref`-valued repeat, a different-source repeat still written, a different-window repeat still written, a repeat after retraction and after supersession still written, a flagged repeat returned without extending the contradiction, a repeat with different confidence returned unchanged, the proposal path linking to the existing assertion; plus a Hypothesis property that applying any write sequence twice leaves the same assertion set as applying it once.
+**Tests required before implementation merges:** conformance vectors on both backends for the three-repeat scenario on a `static` and a `time_varying` predicate, a `ref`-valued repeat, a different-source repeat still written, a different-window repeat still written, a repeat after retraction and after supersession still written, a flagged repeat returned without extending the contradiction, a repeat with different confidence returned unchanged, the proposal path creating no assertion, a write with a `supersedes` hint not being absorbed; plus a Hypothesis property that applying a `static`-predicate write sequence twice leaves the same assertion set as applying it once. The property is deliberately not claimed for `time_varying` predicates: once a later value supersedes an earlier one, replaying the sequence legitimately writes again.
 
 ## Alternatives Considered
 

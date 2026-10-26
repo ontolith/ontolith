@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently.
 
 ### Fixed
+- **Breaking:** writing an assertion identical to an existing `active` or
+  `flagged` one (same subject, predicate, value, author, delegate, source
+  and validity window) is now a no-op that returns the existing assertion
+  (ADR-0054, KI-114). A repeat used to add another active assertion and
+  look like fresh corroboration. A different source, author or window is
+  still written; a repeat that differs only in confidence, rationale or model is
+  dropped, and a write naming a `supersedes` hint is never absorbed.
 - **Breaking:** `resolve_contradiction` now resolves by winning value
   (ADR-0053, KI-113). Members whose value equals the winner's stay active
   instead of being retracted; only members with a different value are

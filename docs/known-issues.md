@@ -2429,6 +2429,22 @@ Resolution is now by winning value (ADR-0053): non-terminal members equal to the
 
 ---
 
+## KI-114 — Re-asserting the same fact wrote a new active assertion every time ✓ RESOLVED (Backlog)
+
+**Severity:** Bug — repeated writes looked like fresh corroboration and grew the assertion table without new information
+**Milestone target:** Backlog — resolved without a milestone change
+**SPEC reference:** SPEC §10.1 (corroboration); ADR-0054
+
+### Description
+
+The same principal asserting `Item.name = "Bolt"` three times from the same source left three active assertions, on `static` and `time_varying` predicates alike. A scheduled re-import of one file therefore looked like new agreement each run, and every caller had to check for an existing assertion before writing.
+
+### Fix
+
+`_apply_with_conflict_routing` now looks for an identical `active` or `flagged` assertion first (`_find_identical_assertion`) and returns it without writing. Identical means equal on subject, predicate, `value_kind`, value, author, `acting_as`, source, `valid_from` and `valid_to`; an unspecified `valid_from` matches an existing one that was also defaulted. Confidence, rationale, model and `value_type` are not part of the key, so a repeat that differs only there is dropped, not applied. A write naming a `supersedes` hint is never treated as a repeat. A different source, author or window is still written as corroboration or new history; `retracted` and `superseded` rows never absorb a repeat. It covers `assert_literal`, `assert_ref`, `propose`/`propose_ref` and proposal replay. A proposal for an identical assertion is still accepted and keeps its own events; no assertion is created or linked to it. Behavior change: a repeat returns the earlier assertion, with its original id and `asserted_at`. Existing duplicate rows are left as they are (append-only).
+
+---
+
 ## Format
 
 Each entry follows this structure:

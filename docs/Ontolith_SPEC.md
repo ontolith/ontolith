@@ -324,7 +324,8 @@ elif t == "static":
 
 Before routing, an incoming assertion identical to an existing `active` or `flagged` one on
 `(subject, predicate, value_kind, value, author, acting_as, source, valid_from, valid_to)` is not written;
-the existing assertion is returned (ADR-0054). Corroboration therefore counts distinct sources or authors,
+the existing assertion is returned (ADR-0054); an unspecified `valid_from` matches an existing assertion whose
+`valid_from` was also defaulted, and a write naming a `supersedes` hint is never absorbed. Corroboration therefore counts distinct sources or authors,
 not repeated writes. Retracted and superseded assertions never absorb a repeat.
 
 > **Implementation deviation, recorded in ADR-0017 and ADR-0050.** The routing above is silent on
