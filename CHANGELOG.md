@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `Ontology.propose_batch` stages 1 to 100 operations as one proposal, accepted or
+  rejected atomically (ADR-0055, KI-115). New typed operations `CreateEntityOp`,
+  `AssertLiteralOp`, `AssertRefOp` and `LocalRef` (exported from `ontolith`) let a
+  batch create entities and assert facts about them; ids are allocated when the
+  proposal is accepted. The configured policy is now evaluated once per
+  operation and the strictest outcome wins, in `propose_batch` and `resubmit`.
+  `SourceQuorum`, `ConfidenceThreshold` and `SourceRequired` send a batch that
+  creates an entity to review. No storage migration.
+- A benchmark for a 100-operation batch (`tests/benchmarks/test_propose_batch.py`).
+  Informational, not a budget gate.
 - A benchmark for extending an open contradiction (`tests/benchmarks/
   test_contradiction_extension.py`, KI-100). Informational, not a budget gate.
 - `RelationDef.target`, a read-only alias for `target_concept` that matches
@@ -33,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently.
 
 ### Fixed
+- `Composite(all=...)` no longer turns a custom `Decision` subclass (neither accept,
+  review nor reject) into an `AutoAccept`; it now requires review.
 - **Breaking:** writing an assertion identical to an existing `active` or
   `flagged` one (same subject, predicate, value, author, delegate, source
   and validity window) is now a no-op that returns the existing assertion

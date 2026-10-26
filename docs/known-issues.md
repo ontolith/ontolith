@@ -2445,6 +2445,38 @@ The same principal asserting `Item.name = "Bolt"` three times from the same sour
 
 ---
 
+## KI-115 — A proposal could stage only one operation, and a later operation would have skipped policy ✓ RESOLVED (Backlog)
+
+**Severity:** Architecture gap — one sentence of meaning needed several single-operation proposals reviewed one by one, and every shipped content-reading policy reads only the first operation
+**Milestone target:** Backlog — resolved without a milestone change
+**SPEC reference:** SPEC §9.1, §9.5; ADR-0055
+
+### Description
+
+`propose` and `propose_ref` each stage exactly one assertion, and an entity could not be part of a proposal, so a decision with its owner and deadline was several proposals. Making the payload carry more operations would have been unsafe: every shipped content-reading `PolicyStrategy` reads `payload["operations"][0]` and ignores the rest, so a low-risk first operation would have carried the others past review. `Composite(all=...)` also dropped a custom `Decision` subclass into an empty `AutoAccept`; it now counts as requiring review.
+
+### Fix
+
+`Ontology.propose_batch` stages 1 to 100 typed operations (`CreateEntityOp`, `AssertLiteralOp`, `AssertRefOp`) as one proposal, accepted or rejected atomically in one transaction. New entities are named by local keys (`LocalRef`) and get ids at accept time. The policy is evaluated once per operation against a single-operation view and the strictest outcome wins (Reject, then RequireReview with reviewers unioned, then AutoAccept); `resubmit` does the same. `PolicyStrategy` is unchanged. A `create_entity` operation has no confidence or source: `SourceQuorum`, `ConfidenceThreshold` and `SourceRequired` route it to review. No storage migration. Retraction inside a batch is not supported. The AI entity-creation bypass is KI-116.
+
+---
+
+## KI-116 — An AI principal can create entities without review
+
+**Severity:** Architecture gap — a rejected agent proposal leaves the entity it created behind, with no review trail
+**Milestone target:** Backlog
+**SPEC reference:** SPEC §9.5; ADR-0055, ADR-0008
+
+### Description
+
+`Ontology.create_entity` only rejects `read`-only principals, so an `ai`-kind principal creates entities directly, and so does the MCP `ontolith.create_entity` tool. When a reviewer rejects the facts the agent proposed about that entity, the empty entity stays.
+
+### Fix
+
+Open. ADR-0055 §3: `create_entity` raises `CapabilityError` for an `ai`-kind author, and the MCP, REST and GraphQL entry points become a one-operation `propose_batch` for AI callers. Part 2 of the ADR-0055 implementation.
+
+---
+
 ## Format
 
 Each entry follows this structure:
