@@ -298,6 +298,9 @@ A principal with `write` capability **MAY** bypass proposals; such writes still 
 ### 9.4 Review workflow
 Review actions (`assign`, `comment`, `accept`, `reject`, `request_changes`) **MUST** be recorded as `proposal_event` rows and surface in provenance.
 
+### 9.5 Multi-operation proposals
+A proposal **MAY** stage several operations (new entities and assertions) as one unit, accepted or rejected atomically (ADR-0055). A conforming implementation **MUST** evaluate policy against **every** operation, not only the first; the strictest outcome wins (`Reject` over `RequireReview` over `AutoAccept`). New entities in a batch are named by local keys and receive their ids when the proposal is accepted. An AI principal **MUST** create entities only through a proposal.
+
 ---
 
 ## 10. Conflict semantics
