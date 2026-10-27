@@ -121,4 +121,16 @@ Not chosen: forcing every multi-operation proposal to review (it removes the rev
 - **`model` and `acting_as` are batch-level** arguments of `propose_batch`, not fields of the assertion ops (the model is recorded on every assertion of the batch). The operation models reject unknown fields.
 - **Completeness validators** (`RequiredFieldsValidator`) look at the subjects of applied assertions, so an entity created by a batch with no assertion about it is not checked. A batch that creates an entity should assert its required fields.
 
-Part 2 (AI `create_entity`, MCP/REST/GraphQL wiring, ADR-0008 amendment) is still to do.
+Part 2 is described below.
+
+## Update (2026-10-26): implementation, part 2
+
+- `Ontology.create_entity` raises `CapabilityError` for an `ai`-kind author, naming `propose_batch`.
+- MCP `ontolith.create_entity` stages a one-operation batch for an AI caller and returns the proposal; it takes an optional `model` (required for AI). MCP `ontolith.propose_batch` is added; its `ops` use an `"op"` discriminator and `{"local": "<key>"}` for a `LocalRef`.
+- REST `POST /entities` returns 202 with the `POST /proposals` response shape for an AI caller.
+- **Deviation:** GraphQL `Mutation.createEntity` is not turned into a proposal for AI callers. Its return type is `EntityType`, so doing so would need a union and break every client; it rejects an AI caller, and a new `Mutation.proposeEntity` stages the one-operation batch. ADR-0008 is amended.
+- CLI `entity create` with an AI author now fails with the `CapabilityError`; the CLI has no batch command.
+- REST `POST /entities` keeps one route that returns an `EntityOut` (201) or a `ProposeOut` (202) by caller kind, declared in OpenAPI. GraphQL cannot do the same without a union, which is why it gets `proposeEntity`; for REST the JSON shapes are distinguishable and the caller kind is fixed per token.
+- A batch that creates an entity needs `propose` capability: `propose_batch` raises `CapabilityError` for a `read`-only author, whatever the policy would do, matching `create_entity`.
+- `Ontology.created_entities(proposal_id)` returns local key to entity id for an applied batch (from the proposal metadata, or the `accept`/`resubmit` event detail). REST `ProposeOut.created_entities` and GraphQL `ProposeResultType.createdEntities` report it on the propose response. Accepting a pending batch through the review routes does not report it; use the SDK method.
+- **Plugins.** `WriteView.create_entity` raises for a plugin running as an `ai` principal, and the plugin views do not offer `propose_batch`, so such a plugin cannot create entities.

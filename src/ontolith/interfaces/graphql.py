@@ -76,7 +76,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast, get_args
 
 import strawberry
 from fastapi import FastAPI, Header
@@ -89,6 +89,7 @@ from strawberry.extensions import (
     SchemaExtension,
 )
 from strawberry.fastapi import GraphQLRouter
+from strawberry.scalars import JSON
 
 from ontolith.core.errors import (
     AuthError,
@@ -99,6 +100,7 @@ from ontolith.core.errors import (
     ValidationError,
 )
 from ontolith.govern.contradiction import Contradiction, ContradictionState, safe_rationale_history
+from ontolith.govern.operations import CreateEntityOp
 from ontolith.govern.proposal import Proposal, ProposalState
 from ontolith.identity import Principal
 from ontolith.ontology import Ontology
@@ -328,6 +330,7 @@ class ProposeResultType:
 
     proposal: ProposalType
     decision: str
+    created_entities: JSON | None = None
 
 
 @strawberry.type
@@ -422,6 +425,29 @@ class CreateEntityInput:
 
     concept: str
     natural_key: str | None = None
+
+
+@strawberry.input
+class ProposeEntityInput:
+    """Input for ``Mutation.proposeEntity`` (ADR-0055)."""
+
+    concept: str
+    natural_key: str | None = None
+    model: str | None = None
+
+
+def _do_propose_entity(kb: Ontology, author: str, payload: ProposeEntityInput) -> ProposeResultType:
+    """Blocking body of Mutation.proposeEntity."""
+    proposal, decision = kb.propose_batch(
+        [CreateEntityOp(key="entity", concept=payload.concept, natural_key=payload.natural_key)],
+        author,
+        model=payload.model,
+    )
+    return ProposeResultType(
+        proposal=_proposal_type(proposal),
+        decision=type(decision).__name__,
+        created_entities=cast(JSON | None, kb.created_entities(proposal.id) or None),
+    )
 
 
 def _do_create_entity(kb: Ontology, author: str, payload: CreateEntityInput) -> EntityType:
@@ -937,12 +963,27 @@ class Mutation:
     async def create_entity(self, info: strawberry.Info, input: CreateEntityInput) -> EntityType:
         """Create a new entity (KI-082). Propose-tier — same capability
         gate as every other governed write (``Ontology.create_entity``
-        rejects a ``read``-only principal). The acting principal is
+        rejects a ``read``-only principal). An ``ai``-kind principal is
+        rejected too and uses ``proposeEntity`` instead (ADR-0055). The acting principal is
         resolved from the bearer token (ADR-0014), never taken from the
         input (mirrors REST's POST /entities)."""
         principal = _require_principal(info)
         kb = _kb(info)
         return await run_in_threadpool(_do_create_entity, kb, principal.id, input)
+
+    @strawberry.mutation
+    async def propose_entity(
+        self, info: strawberry.Info, input: ProposeEntityInput
+    ) -> ProposeResultType:
+        """Propose a new entity as a one-operation batch (ADR-0055). The
+        route for an ``ai``-kind principal, whose ``createEntity`` is
+        rejected: under the default policy the proposal goes to review and a
+        rejected one leaves no entity behind. ``model`` is required for an AI
+        principal. The acting principal is resolved from the bearer token
+        (ADR-0014)."""
+        principal = _require_principal(info)
+        kb = _kb(info)
+        return await run_in_threadpool(_do_propose_entity, kb, principal.id, input)
 
     @strawberry.mutation
     async def propose(self, info: strawberry.Info, input: ProposeInput) -> ProposeResultType:

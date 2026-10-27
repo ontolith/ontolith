@@ -32,7 +32,10 @@ The MCP (Model Context Protocol) server exposes Ontolith to AI agents as a tool.
 9. **`ontolith.list_contradictions`** — Read-only contradiction listing (read; added 2026-09-03,
    see Update below, KI-076)
 10. **`ontolith.create_entity`** — Create a new entity (propose, not a direct write in this ADR's
-    sense; added 2026-09-08, see Update below, KI-082)
+    sense; added 2026-09-08, see Update below, KI-082). For an `ai`-kind caller it stages a
+    one-operation batch and returns a proposal (amended 2026-10-26, ADR-0055)
+11. **`ontolith.propose_batch`** — Propose several entities and facts as one proposal (propose,
+    NOT write; added 2026-10-26, ADR-0055)
 
 **Forbidden Tools:**
 - ❌ `ontolith.write` — No direct write
@@ -170,6 +173,28 @@ duplicate `(namespace, concept, natural_key)` triggered the DB's `UNIQUE` constr
 surfacing as a redacted, generic `StorageError` (500-class) rather than a caller-actionable
 `ValidationError` naming the conflict — **KI-091 since resolved** too, via
 `_require_unique_natural_key()` and a new `StorageBackend.get_entity_by_natural_key()` port method.
+
+## Update (2026-10-26): AI entity creation goes through a proposal, `ontolith.propose_batch` added, ADR-0055
+
+The 2026-09-08 update above reasoned that an entity is "an identity anchor, not a fact", so
+`ontolith.create_entity` could create one directly. That holds for the entity row by itself but
+not for an agent's entity together with the facts that justify it: when a reviewer rejects those
+facts, the entity the agent already created stays behind with no review trail (ADR-0055).
+
+- `Ontology.create_entity` now raises `CapabilityError` for an `ai`-kind author. Human and service
+  principals are unchanged.
+- **`ontolith.create_entity`**, called by an `ai`-kind principal, stages a one-operation batch
+  (`CreateEntityOp`) and returns the proposal and decision (the `ontolith.propose_batch` shape)
+  instead of an entity. Other callers still get the entity. It takes an optional `model`, required
+  for AI callers.
+- **`ontolith.propose_batch`** (11th tool, propose tier) takes `ops[]` (`create_entity`,
+  `assert_literal`, `assert_ref`; `{"local": "<key>"}` names an entity created earlier in the
+  batch), stamps the author from the verified token and returns the proposal. It exposes no
+  direct write: the server's `PolicyStrategy` is evaluated per operation and the strictest outcome
+  wins. The "no direct write" boundary above is unchanged.
+- REST `POST /entities` returns 202 with the proposal for an AI caller. GraphQL
+  `Mutation.createEntity` rejects an AI caller and `Mutation.proposeEntity` is the route for it,
+  because a union return type would have broken every existing GraphQL client.
 
 ## References
 

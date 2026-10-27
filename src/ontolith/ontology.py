@@ -438,7 +438,11 @@ class Ontology:
 
         Raises:
             AuthError: author is not a known principal
-            CapabilityError: author's capability is 'read'
+            CapabilityError: author's capability is 'read', or author is
+                an ``ai``-kind principal (ADR-0055: an AI creates an entity
+                only inside a proposal, via `propose_batch` with a
+                `CreateEntityOp`, so a rejected proposal leaves no entity
+                behind)
             ValidationError: concept is not declared in the active schema
                 (KI-090), or natural_key is already taken within concept
                 (KI-091)
@@ -456,6 +460,11 @@ class Ontology:
             raise AuthError(f"Principal not found: {author}")
         if principal.default_capability == "read":
             raise CapabilityError(f"Principal {author!r} lacks propose capability")
+        if principal.kind == "ai":
+            raise CapabilityError(
+                f"Principal {author!r} is an AI principal and cannot create an entity "
+                "directly; stage a CreateEntityOp with propose_batch instead (ADR-0055)"
+            )
         self._require_known_concept(concept)
 
         # KI-092: the natural-key uniqueness check and the write it guards
@@ -1799,7 +1808,8 @@ class Ontology:
 
         Raises:
             AuthError: author or acting_as is not a known principal
-            CapabilityError: delegation is unauthorized
+            CapabilityError: delegation is unauthorized, or the batch creates
+                an entity and author's capability is 'read'
             NotFoundError: a real subject or target is not a known entity id
             ValidationError: ops is empty or over 100; a key is duplicated,
                 or a `LocalRef` names no earlier `CreateEntityOp`; a concept
@@ -1811,6 +1821,12 @@ class Ontology:
                 assertion
         """
         principal = self._get_principal_or_raise(author)
+        if principal.default_capability == "read" and any(
+            isinstance(op, CreateEntityOp) for op in ops
+        ):
+            # Same floor `create_entity` enforces, applied here so it holds
+            # whatever the configured policy does with the batch.
+            raise CapabilityError(f"Principal {author!r} lacks propose capability")
         self._require_model_for_ai(principal, model)
         self._validate_batch_ops(ops)
         delegating = self._resolve_delegation(principal, author, acting_as)
@@ -1851,6 +1867,35 @@ class Ontology:
             self.backend.put_proposal(accepted)
             self._replay_proposal_operations(accepted, now, created_entities=created)
         return accepted, decision
+
+    def created_entities(self, proposal_id: str) -> dict[str, str]:
+        """Local key to entity id for the entities a batch proposal created
+        (ADR-0055), or ``{}`` if it created none or has not been applied.
+
+        Read from the proposal's metadata (an auto-accepted batch) or, for a
+        batch applied by a reviewer or a resubmit, from the latest
+        ``accept``/``resubmit`` event's JSON ``detail``.
+
+        Raises:
+            NotFoundError: proposal_id does not name an existing proposal
+        """
+        proposal = self.backend.get_proposal(proposal_id)
+        if proposal is None:
+            raise NotFoundError(f"Proposal not found: {proposal_id}")
+        direct = proposal.metadata.get("created_entities")
+        if isinstance(direct, dict):
+            return {str(k): str(v) for k, v in direct.items()}
+        for event in reversed(self.backend.get_proposal_events(proposal_id)):
+            if event.type not in ("accept", "resubmit") or not event.detail:
+                continue
+            try:
+                detail = json.loads(event.detail)
+            except ValueError:
+                continue
+            created = detail.get("created_entities") if isinstance(detail, dict) else None
+            if isinstance(created, dict):
+                return {str(k): str(v) for k, v in created.items()}
+        return {}
 
     def _validate_batch_ops(self, ops: Sequence[BatchOp]) -> None:
         """Submit-time checks for `propose_batch` (ADR-0055 §1): the same

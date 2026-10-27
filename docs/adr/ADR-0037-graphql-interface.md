@@ -466,6 +466,10 @@ active schema (**KI-090 since resolved**, via `_require_known_concept()`), and a
 caller-actionable validation error (**KI-091 since resolved** too, via
 `_require_unique_natural_key()`).
 
+## Update (2026-10-26): `proposeEntity`, ADR-0055
+
+`Mutation.createEntity` rejects an `ai`-kind caller (`CAPABILITY_ERROR`); `Mutation.proposeEntity(input: {concept, naturalKey, model})` stages a one-operation batch and returns `ProposeResultType` (now with a `createdEntities` JSON field). The 2026-09-08 reasoning above that entity creation has no proposal path no longer holds for AI principals. `createEntity` keeps its `EntityType` return, since turning it into a union would break every existing client.
+
 ## References
 
 - SPEC §14.3 (REST + GraphQL), §16 (error model), §8.3 (capabilities), §17

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from mcp.server.lowlevel.server import request_ctx
 from mcp.shared.context import RequestContext
 from starlette.datastructures import Headers
@@ -275,14 +276,61 @@ class TestCreateEntityTool:
         result = mcp._tool_manager.get_tool("ontolith.get").fn(entity_id=created["id"], token=token)
         assert result["entity"]["id"] == created["id"]
 
-    def test_propose_capability_succeeds(self, tmp_path: Path) -> None:
-        """Propose-tier, not write-tier — AI's own default capability suffices."""
+    def test_ai_caller_gets_a_proposal_and_no_entity(self, tmp_path: Path) -> None:
+        """ADR-0055: an AI principal's create_entity stages a one-operation
+        batch. Under ThresholdPolicy it goes to review; nothing is created
+        until a reviewer accepts."""
+        kb = _kb(tmp_path)
+        mcp, _ = _server(kb)
+        result = mcp._tool_manager.get_tool("ontolith.create_entity").fn(
+            concept="Person", model="m-1", token=kb.issue_token(AI, author=ADMIN)[0]
+        )
+        assert result["decision"] == "RequireReview"
+        assert result["proposal"]["state"] == "require_review"
+        assert "id" not in result
+        assert kb.backend.entities(concept="Person") == []
+
+        kb.accept_proposal(result["proposal"]["id"], REVIEWER)
+        [entity] = kb.backend.entities(concept="Person")
+        assert entity.created_by == AI
+
+    def test_ai_caller_without_model_is_a_validation_error(self, tmp_path: Path) -> None:
         kb = _kb(tmp_path)
         mcp, _ = _server(kb)
         result = mcp._tool_manager.get_tool("ontolith.create_entity").fn(
             concept="Person", token=kb.issue_token(AI, author=ADMIN)[0]
         )
-        assert result["concept"] == "Person"
+        assert result["code"] == "VALIDATION_ERROR"
+        assert kb.backend.proposals() == []
+
+    def test_read_only_ai_caller_is_refused_not_proposed(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        kb.create_principal(
+            "ro-agent", kind="ai", owner=HUMAN, auth_method="workload", default_capability="read"
+        )
+        mcp, _ = _server(kb)
+        result = mcp._tool_manager.get_tool("ontolith.create_entity").fn(
+            concept="Person", model="m-1", token=kb.issue_token("ro-agent", author=ADMIN)[0]
+        )
+        assert result["code"] == "CAPABILITY_ERROR"
+        assert kb.backend.proposals() == []
+
+    def test_human_model_argument_is_ignored(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        mcp, _ = _server(kb)
+        result = mcp._tool_manager.get_tool("ontolith.create_entity").fn(
+            concept="Person", model="ignored", token=kb.issue_token(HUMAN, author=ADMIN)[0]
+        )
+        assert result["created_by"] == HUMAN
+
+    def test_rejected_ai_proposal_leaves_no_entity(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        mcp, _ = _server(kb)
+        result = mcp._tool_manager.get_tool("ontolith.create_entity").fn(
+            concept="Person", model="m-1", token=kb.issue_token(AI, author=ADMIN)[0]
+        )
+        kb.reject_proposal(result["proposal"]["id"], REVIEWER, "no")
+        assert kb.backend.entities(concept="Person") == []
 
     def test_read_capability_forbidden(self, tmp_path: Path) -> None:
         kb = _kb(tmp_path)
@@ -1191,10 +1239,11 @@ class TestProposeTool:
 
     def test_all_required_tools_registered(self, tmp_path: Path) -> None:
         """ADR-0008 plus resubmit (KI-027), retract (KI-057, ADR-0039),
-        list_contradictions (KI-076), and create_entity (KI-082): the
-        registered tool set must be exactly these 10 — no more, no fewer
+        list_contradictions (KI-076), create_entity (KI-082), and propose_batch
+        (ADR-0055): the
+        registered tool set must be exactly these 11 — no more, no fewer
         (KI-085). A subset check here would pass even if a future PR added
-        an 11th tool under a name test_no_write_tool_registered's blocklist
+        a 12th tool under a name test_no_write_tool_registered's blocklist
         doesn't happen to cover; adding a tool on purpose means updating
         this set deliberately."""
         kb = _kb(tmp_path)
@@ -1204,6 +1253,7 @@ class TestProposeTool:
             "ontolith.schema",
             "ontolith.get",
             "ontolith.create_entity",
+            "ontolith.propose_batch",
             "ontolith.query",
             "ontolith.provenance",
             "ontolith.list_contradictions",
@@ -1213,6 +1263,106 @@ class TestProposeTool:
             "ontolith.retract",
         }
         assert tool_names == required
+
+
+# ---------------------------------------------------------------------------
+# ontolith.propose_batch (ADR-0055)
+# ---------------------------------------------------------------------------
+
+
+def _decision_ops(owner: str) -> list[dict]:
+    return [
+        {"op": "create_entity", "key": "d1", "concept": "Decision"},
+        {
+            "op": "assert_literal",
+            "subject": {"local": "d1"},
+            "predicate": "Decision.title",
+            "value": "Ship it",
+            "value_type": "Text",
+        },
+        {
+            "op": "assert_ref",
+            "subject": {"local": "d1"},
+            "predicate": "Decision.owner",
+            "target": owner,
+        },
+    ]
+
+
+class TestProposeBatchTool:
+    def _tool(self, kb: Ontology):
+        mcp, _ = _server(kb)
+        return mcp._tool_manager.get_tool("ontolith.propose_batch").fn
+
+    def test_ai_batch_goes_to_review_then_creates_everything_on_accept(
+        self, tmp_path: Path
+    ) -> None:
+        kb = _kb(tmp_path)
+        owner = kb.create_entity("Person", author=HUMAN).id
+        result = self._tool(kb)(
+            ops=_decision_ops(owner), model="m-1", token=kb.issue_token(AI, author=ADMIN)[0]
+        )
+        assert result["decision"] == "RequireReview"
+        assert kb.backend.entities(concept="Decision") == []
+
+        kb.accept_proposal(result["proposal"]["id"], REVIEWER)
+
+        [decision] = kb.backend.entities(concept="Decision")
+        assert {a.predicate for a in kb.backend.assertions(subject=decision.id)} == {
+            "Decision.title",
+            "Decision.owner",
+        }
+
+    def test_human_batch_auto_accepts_and_reports_created_ids(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        owner = kb.create_entity("Person", author=HUMAN).id
+        result = self._tool(kb)(
+            ops=_decision_ops(owner), token=kb.issue_token(HUMAN, author=ADMIN)[0]
+        )
+        [decision] = kb.backend.entities(concept="Decision")
+        assert result["decision"] == "AutoAccept"
+        assert result["proposal"]["created_entities"] == {"d1": decision.id}
+
+    @pytest.mark.parametrize(
+        "ops",
+        [
+            [{"op": "teleport"}],
+            [{"concept": "Person", "key": "k"}],
+            [{"op": "create_entity", "key": "k", "concept": "Person", "bogus": 1}],
+            [
+                {
+                    "op": "assert_literal",
+                    "subject": {"local": "k", "extra": 1},
+                    "predicate": "Person.name",
+                    "value": "x",
+                    "value_type": "Text",
+                }
+            ],
+            [
+                {
+                    "op": "assert_literal",
+                    "subject": {"local": ""},
+                    "predicate": "Person.name",
+                    "value": "x",
+                    "value_type": "Text",
+                }
+            ],
+            [{"op": "create_entity", "key": f"k{i}", "concept": "Person"} for i in range(101)],
+            [],
+        ],
+    )
+    def test_malformed_ops_are_validation_errors(self, tmp_path: Path, ops: list[dict]) -> None:
+        kb = _kb(tmp_path)
+        result = self._tool(kb)(ops=ops, token=kb.issue_token(HUMAN, author=ADMIN)[0])
+        assert result["code"] == "VALIDATION_ERROR"
+        assert kb.backend.proposals() == []
+
+    def test_invalid_token_returns_auth_error(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        result = self._tool(kb)(
+            ops=[{"op": "create_entity", "key": "k", "concept": "Person"}], token="nope"
+        )
+        assert result["code"] == "AUTH_ERROR"
 
 
 # ---------------------------------------------------------------------------

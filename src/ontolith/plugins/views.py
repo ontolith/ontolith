@@ -90,8 +90,9 @@ class WriteView(ReadOnlyView):
     principal id. propose/propose_ref/retract go through Ontology's SPEC §10
     conflict routing and policy evaluation; create_entity is capability-gated
     (`Ontology.create_entity` requires `>= propose`) but is NOT itself SPEC
-    §10 governed — entities are structural records, not assertions, and have
-    no proposal/review path in this codebase.
+    §10 governed — entities are structural records, not assertions. For an
+    `ai`-kind principal `Ontology.create_entity` raises (ADR-0055); the view
+    does not offer `propose_batch`, so such a plugin cannot create entities.
     """
 
     def create_entity(self, concept: str, natural_key: str | None = None) -> Entity:

@@ -19,7 +19,7 @@ from hypothesis import strategies as st
 from conformance.conftest import KbFactory
 from ontolith import Ontology
 from ontolith.core import FixedClock, SequentialIdProvider
-from ontolith.core.errors import NotFoundError, ValidationError
+from ontolith.core.errors import CapabilityError, NotFoundError, ValidationError
 from ontolith.govern import (
     AssertLiteralOp,
     AssertRefOp,
@@ -354,13 +354,32 @@ def test_ai_batch_requires_a_model(make_kb: KbFactory) -> None:
         kb.propose_batch([CreateEntityOp(key="k", concept="Person")], AI)
 
 
-def test_read_only_author_is_rejected_by_policy(make_kb: KbFactory) -> None:
+def test_read_only_author_is_refused_before_policy(make_kb: KbFactory) -> None:
+    """Creating an entity needs `propose` capability whatever the policy
+    says; a batch of only assertions is left to the policy (Reject)."""
     kb = _kb(make_kb)
     kb.create_principal("viewer", kind="human", auth_method="oidc", default_capability="read")
-    proposal, decision = kb.propose_batch([CreateEntityOp(key="k", concept="Person")], "viewer")
-    assert isinstance(decision, Reject)
-    assert proposal.state == "rejected"
-    assert _entities(kb, "Person") == []
+    with pytest.raises(CapabilityError):
+        kb.propose_batch([CreateEntityOp(key="k", concept="Person")], "viewer")
+    subject = kb.create_entity("Person", author=HUMAN).id
+    proposal, decision = kb.propose_batch(
+        [AssertLiteralOp(subject=subject, predicate="Person.name", value="x", value_type="Text")],
+        "viewer",
+    )
+    assert isinstance(decision, Reject) and proposal.state == "rejected"
+
+
+def test_created_entities_is_readable_for_every_apply_path(make_kb: KbFactory) -> None:
+    kb = _kb(make_kb)
+    auto, _ = kb.propose_batch([CreateEntityOp(key="a", concept="Person")], HUMAN)
+    assert kb.created_entities(auto.id) == auto.metadata["created_entities"]
+    reviewed, _ = kb.propose_batch([CreateEntityOp(key="b", concept="Person")], AI, model="m")
+    assert kb.created_entities(reviewed.id) == {}
+    kb.accept_proposal(reviewed.id, REVIEWER)
+    [new_id] = kb.created_entities(reviewed.id).values()
+    assert kb.get_entity(new_id) is not None
+    with pytest.raises(NotFoundError):
+        kb.created_entities("nope")
 
 
 # --- atomicity ---------------------------------------------------------------
@@ -656,6 +675,43 @@ def test_unknown_operation_kind_in_a_stored_payload_fails_loudly(make_kb: KbFact
     kb.backend.put_proposal(proposal)
     with pytest.raises(ValidationError, match="teleport"):
         kb.accept_proposal("p-bad", REVIEWER)
+
+
+# --- AI entity creation (ADR-0055 §3) ----------------------------------------
+
+
+def test_ai_principal_cannot_create_an_entity_directly(make_kb: KbFactory) -> None:
+    kb = _kb(make_kb)
+    with pytest.raises(CapabilityError, match="propose_batch"):
+        kb.create_entity("Person", author=AI)
+    assert _entities(kb, "Person") == []
+
+
+def test_ai_entity_creation_through_a_proposal_leaves_no_orphan_when_rejected(
+    make_kb: KbFactory,
+) -> None:
+    kb = _kb(make_kb)
+    proposal, decision = kb.propose_batch(
+        [CreateEntityOp(key="p", concept="Person", natural_key="ada")], AI, model="m-1"
+    )
+    assert isinstance(decision, RequireReview)
+    kb.reject_proposal(proposal.id, REVIEWER, "no")
+    assert _entities(kb, "Person") == []
+    # The natural key stays free for a later, accepted proposal.
+    again, _ = kb.propose_batch(
+        [CreateEntityOp(key="p", concept="Person", natural_key="ada")], AI, model="m-1"
+    )
+    kb.accept_proposal(again.id, REVIEWER)
+    assert len(_entities(kb, "Person")) == 1
+
+
+@pytest.mark.parametrize("kind,capability", [("human", "write"), ("service", "write")])
+def test_non_ai_principals_still_create_entities_directly(
+    make_kb: KbFactory, kind: str, capability: str
+) -> None:
+    kb = _kb(make_kb)
+    kb.create_principal("direct", kind=kind, auth_method="workload", default_capability=capability)
+    assert kb.create_entity("Person", author="direct").created_by == "direct"
 
 
 # --- review findings ---------------------------------------------------------

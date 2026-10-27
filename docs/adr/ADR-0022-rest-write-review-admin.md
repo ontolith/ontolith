@@ -500,6 +500,10 @@ can't isolate their own `changes_requested` proposals from everyone else's). The
 reverted back to `state="require_review"`; `"pending"` remains available as an explicit,
 documented opt-in (`GET /proposals?state=pending`, `ontolith proposal list --state pending`).
 
+## Update (2026-10-26): `POST /entities` for AI callers, ADR-0055
+
+For an `ai`-kind caller `POST /entities` stages a one-operation batch and returns 202 with the `POST /proposals` response shape (`ProposeOut`, including `created_entities` once applied) instead of 201 and an `EntityOut`. `model` is required for such a caller. The same route therefore returns one of two shapes by caller kind; the OpenAPI document declares both. A `read`-only caller still gets 403.
+
 ## References
 
 - SPEC §14.3 (REST + GraphQL), §16 (error model), §8.3 (capabilities), §8.1

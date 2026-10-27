@@ -587,6 +587,9 @@ class TestAuthCoversEveryField:
     }
     _MUTATION_FIELD_PROBES: dict[str, str] = {
         "createEntity": ('mutation { createEntity(input: {concept: "Person"}) { id } }'),
+        "proposeEntity": (
+            'mutation { proposeEntity(input: {concept: "Person", model: "m"}) { decision } }'
+        ),
         "propose": (
             'mutation { propose(input: {subject: "s", predicate: "p", value: "v", '
             'valueType: "Text"}) { decision } }'
@@ -779,8 +782,8 @@ class TestCreateEntityMutation:
         body = _gql(client, f'{{ entity(id: "{created["id"]}") {{ id }} }}', headers=_auth(token))
         assert body["data"]["entity"]["id"] == created["id"]
 
-    def test_propose_capability_succeeds(self, tmp_path: Path) -> None:
-        """Propose-tier, not write-tier — AI's own default capability suffices."""
+    def test_ai_caller_is_directed_to_propose_entity(self, tmp_path: Path) -> None:
+        """ADR-0055: an AI principal cannot create an entity directly."""
         kb = _kb(tmp_path)
         client, _ = _client(kb)
         token, _ = kb.issue_token(AI, author=ADMIN)
@@ -790,7 +793,60 @@ class TestCreateEntityMutation:
             variables={"input": {"concept": "Person"}},
             headers=_auth(token),
         )
-        assert body["data"]["createEntity"]["concept"] == "Person"
+        assert body["errors"][0]["extensions"]["code"] == "CAPABILITY_ERROR"
+        assert kb.backend.entities(concept="Person") == []
+
+    def test_propose_entity_without_model_for_ai_is_a_validation_error(
+        self, tmp_path: Path
+    ) -> None:
+        kb = _kb(tmp_path)
+        client, _ = _client(kb)
+        token, _ = kb.issue_token(AI, author=ADMIN)
+        body = _gql(
+            client,
+            """mutation($input: ProposeEntityInput!) {
+              proposeEntity(input: $input) { decision }
+            }""",
+            variables={"input": {"concept": "Person"}},
+            headers=_auth(token),
+        )
+        assert body["errors"][0]["extensions"]["code"] == "VALIDATION_ERROR"
+
+    def test_propose_entity_reports_created_ids_when_applied(self, tmp_path: Path) -> None:
+        """A human's proposeEntity auto-accepts under ThresholdPolicy."""
+        kb = _kb(tmp_path)
+        client, _ = _client(kb)
+        token, _ = kb.issue_token(HUMAN, author=ADMIN)
+        body = _gql(
+            client,
+            """mutation($input: ProposeEntityInput!) {
+              proposeEntity(input: $input) { decision createdEntities }
+            }""",
+            variables={"input": {"concept": "Person"}},
+            headers=_auth(token),
+        )
+        [entity] = kb.backend.entities(concept="Person")
+        assert body["data"]["proposeEntity"]["createdEntities"] == {"entity": entity.id}
+
+    def test_propose_entity_stages_a_one_operation_batch(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        client, _ = _client(kb)
+        token, _ = kb.issue_token(AI, author=ADMIN)
+        body = _gql(
+            client,
+            """mutation($input: ProposeEntityInput!) {
+              proposeEntity(input: $input) { decision proposal { id state } }
+            }""",
+            variables={"input": {"concept": "Person", "model": "m-1"}},
+            headers=_auth(token),
+        )
+        result = body["data"]["proposeEntity"]
+        assert result["decision"] == "RequireReview"
+        assert result["proposal"]["state"] == "require_review"
+        assert kb.backend.entities(concept="Person") == []
+
+        kb.accept_proposal(result["proposal"]["id"], REVIEWER)
+        assert len(kb.backend.entities(concept="Person")) == 1
 
     def test_read_capability_forbidden(self, tmp_path: Path) -> None:
         kb = _kb(tmp_path)

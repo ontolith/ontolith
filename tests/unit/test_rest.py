@@ -250,13 +250,70 @@ class TestCreateEntityRoute:
         assert response.status_code == 200
         assert response.json()["entity"]["id"] == created["id"]
 
-    def test_propose_capability_succeeds(self, tmp_path: Path) -> None:
-        """Propose-tier, not write-tier — AI's own default capability suffices."""
+    def test_ai_caller_gets_a_202_proposal_and_no_entity(self, tmp_path: Path) -> None:
+        """ADR-0055: an AI principal's POST /entities stages a one-operation
+        batch and returns the proposal, not an entity."""
+        kb = _kb(tmp_path)
+        client, _ = _client(kb)
+        token, _ = kb.issue_token(AI, author=ADMIN)
+        response = client.post(
+            "/entities", json={"concept": "Person", "model": "m-1"}, headers=_auth(token)
+        )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["decision"] == "RequireReview"
+        assert body["proposal"]["state"] == "require_review"
+        assert kb.backend.entities(concept="Person") == []
+
+        kb.accept_proposal(body["proposal"]["id"], REVIEWER)
+        assert len(kb.backend.entities(concept="Person")) == 1
+
+    def test_read_only_ai_caller_is_a_403(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        kb.create_principal(
+            "ro-agent", kind="ai", owner=HUMAN, auth_method="workload", default_capability="read"
+        )
+        client, _ = _client(kb)
+        token, _ = kb.issue_token("ro-agent", author=ADMIN)
+        response = client.post(
+            "/entities", json={"concept": "Person", "model": "m"}, headers=_auth(token)
+        )
+        assert response.status_code == 403
+        assert response.json()["code"] == "CAPABILITY_ERROR"
+        assert kb.backend.proposals() == []
+
+    def test_openapi_declares_both_outcomes(self, tmp_path: Path) -> None:
+        kb = _kb(tmp_path)
+        client, _ = _client(kb)
+        responses = client.get("/openapi.json").json()["paths"]["/entities"]["post"]["responses"]
+        assert {"201", "202"} <= set(responses)
+
+    def test_created_entities_reported_when_the_batch_is_applied(self, tmp_path: Path) -> None:
+        """A custom policy that auto-accepts AI creates: 202 carries the id."""
+        from ontolith.govern import AutoAccept
+
+        class AcceptAll:
+            def evaluate(self, proposal, principal, kb, acting_as=None):
+                return AutoAccept("ok")
+
+        kb = _kb(tmp_path)
+        kb.policy = AcceptAll()
+        client, _ = _client(kb)
+        token, _ = kb.issue_token(AI, author=ADMIN)
+        response = client.post(
+            "/entities", json={"concept": "Person", "model": "m"}, headers=_auth(token)
+        )
+        assert response.status_code == 202
+        [entity] = kb.backend.entities(concept="Person")
+        assert response.json()["created_entities"] == {"entity": entity.id}
+
+    def test_ai_caller_without_model_is_a_400(self, tmp_path: Path) -> None:
         kb = _kb(tmp_path)
         client, _ = _client(kb)
         token, _ = kb.issue_token(AI, author=ADMIN)
         response = client.post("/entities", json={"concept": "Person"}, headers=_auth(token))
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert response.json()["code"] == "VALIDATION_ERROR"
 
     def test_read_capability_forbidden(self, tmp_path: Path) -> None:
         kb = _kb(tmp_path)
