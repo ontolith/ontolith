@@ -2,18 +2,20 @@
 
 Exposes read/propose/flag tools to AI agents. No direct write tool is exposed;
 every *assertion* mutation flows through the proposal/policy pipeline.
-``ontolith.create_entity`` (KI-082) is the one exception to "every mutation
-flows through propose": entity creation was never gated behind
-proposal/policy at the SDK level either (an entity carries no fact/
-confidence/temporality for a policy to evaluate — it's an identity anchor,
-not an assertion), so this tool is propose-tier, same capability floor as
-every other tool here, not a "direct write" in ADR-0008's sense.
+``ontolith.create_entity`` (KI-082) creates an entity directly only for a
+non-AI principal (an entity is an identity anchor, not a fact). For an
+``ai``-kind principal it stages a one-operation batch instead and returns
+the proposal, so a rejected agent proposal leaves no entity behind
+(ADR-0055). ``ontolith.propose_batch`` stages several entities and facts as
+one proposal.
 
 Tools (ADR-0008, plus resubmit added for KI-027, retract added for KI-057/ADR-0039,
-list_contradictions added for KI-076, create_entity added for KI-082):
+list_contradictions added for KI-076, create_entity added for KI-082,
+propose_batch added for ADR-0055):
   ontolith.schema           — read concept/relation definitions
   ontolith.get              — fetch entity + current assertions
-  ontolith.create_entity    — create a new entity (propose-tier, not a direct write)
+  ontolith.create_entity    — create a new entity (AI callers get a proposal, ADR-0055)
+  ontolith.propose_batch    — propose several entities/facts as one proposal (NOT write)
   ontolith.query            — symbolic entity retrieval
   ontolith.provenance       — full provenance trail for an assertion
   ontolith.list_contradictions — read-only contradiction listing
@@ -80,11 +82,22 @@ import logging
 from typing import TYPE_CHECKING, Any, get_args
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import ValidationError as PydanticValidationError
 
-from ontolith.core.errors import OntolithError, PluginError, StorageError
+from ontolith.core.errors import OntolithError, PluginError, StorageError, ValidationError
 from ontolith.govern.contradiction import ContradictionState
+from ontolith.govern.operations import (
+    MAX_BATCH_OPERATIONS,
+    AssertLiteralOp,
+    AssertRefOp,
+    BatchOp,
+    CreateEntityOp,
+    LocalRef,
+)
 
 if TYPE_CHECKING:
+    from ontolith.govern.policy import Decision
+    from ontolith.govern.proposal import Proposal
     from ontolith.identity.ports import AuthProvider
     from ontolith.ontology import Ontology
 
@@ -114,6 +127,63 @@ _CONTRADICTION_STATES: tuple[str, ...] = get_args(ContradictionState)
 # closed for exactly the case this isinstance check fails open on.
 _REDACT_MESSAGE_FOR: tuple[type[OntolithError], ...] = (StorageError, PluginError)
 _GENERIC_SERVER_ERROR_MESSAGE = "An internal error occurred"
+
+
+_BATCH_OP_MODELS: dict[str, type[CreateEntityOp | AssertLiteralOp | AssertRefOp]] = {
+    "create_entity": CreateEntityOp,
+    "assert_literal": AssertLiteralOp,
+    "assert_ref": AssertRefOp,
+}
+
+
+def _parse_batch_ops(raw: list[dict[str, Any]]) -> list[BatchOp]:
+    """Turn `ontolith.propose_batch`'s JSON ops into typed operations.
+
+    ``{"local": "key"}`` in ``subject``/``target`` becomes a `LocalRef`.
+    Unknown ``op`` values, unknown fields and malformed fields are a
+    `ValidationError` (the wire boundary; the SDK models validate the rest).
+    """
+    if len(raw) > MAX_BATCH_OPERATIONS:
+        raise ValidationError(
+            f"A batch holds at most {MAX_BATCH_OPERATIONS} operations; got {len(raw)}"
+        )
+    ops: list[BatchOp] = []
+    for index, entry in enumerate(raw):
+        fields = dict(entry)
+        kind = fields.pop("op", None)
+        model = _BATCH_OP_MODELS.get(kind) if isinstance(kind, str) else None
+        if model is None:
+            raise ValidationError(f"ops[{index}]: 'op' must be one of {sorted(_BATCH_OP_MODELS)}")
+        try:
+            for field in ("subject", "target"):
+                value = fields.get(field)
+                if isinstance(value, dict):
+                    if set(value) != {"local"} or not isinstance(value["local"], str):
+                        raise ValidationError(
+                            f'ops[{index}].{field}: expected an entity id or {{"local": "<key>"}}'
+                        )
+                    fields[field] = LocalRef(value["local"])
+            ops.append(model.model_validate(fields))
+        except PydanticValidationError as exc:
+            first = exc.errors()[0]
+            raise ValidationError(f"ops[{index}]: {first['msg']} ({first['loc']})") from None
+    return ops
+
+
+def _batch_response(proposal: Proposal, decision: Decision) -> dict[str, Any]:
+    """The `{"proposal", "decision"}` shape `ontolith.propose` returns,
+    plus `created_entities` once a batch has been applied (ADR-0055)."""
+    out: dict[str, Any] = {
+        "id": proposal.id,
+        "state": proposal.state,
+        "policy_reason": proposal.policy_reason,
+        "decided_at": proposal.decided_at.isoformat() if proposal.decided_at else None,
+        "acting_as": proposal.acting_as,
+    }
+    created = proposal.metadata.get("created_entities")
+    if created:
+        out["created_entities"] = created
+    return {"proposal": out, "decision": type(decision).__name__}
 
 
 def create_mcp_server(
@@ -358,14 +428,22 @@ def create_mcp_server(
         concept: str,
         natural_key: str | None = None,
         token: str | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
-        """Create a new entity. Propose-tier — same capability gate as every
-        other governed write (``Ontology.create_entity`` rejects a
-        ``read``-only principal).
+        """Create a new entity. Propose-tier: a ``read``-only principal is
+        refused (``CAPABILITY_ERROR``) for every caller kind.
+
+        An ``ai``-kind principal does not create the entity directly: this
+        stages a one-operation batch (ADR-0055) and returns the proposal and
+        decision, in the same shape as ``ontolith.propose_batch``. Under the
+        default ``ThresholdPolicy`` it goes to review, and a rejected
+        proposal leaves no entity behind.
 
         Args:
             concept: Concept name (e.g. "Person", "Organization")
             natural_key: Optional unique key within concept
+            model: Model family+version; required when the calling principal
+                is AI-kind, ignored otherwise
             token: Bearer token identifying the calling principal (ADR-0014).
                 Optional: an ``Authorization`` header takes priority when the
                 transport supplies one (KI-067, see module docstring); this
@@ -375,8 +453,10 @@ def create_mcp_server(
                 stdio becomes unusable.
 
         Returns:
-            Dict with the created entity's fields, or "error" if no token
-            was resolvable, it does not resolve to a valid principal, the
+            Dict with the created entity's fields (or, for an AI principal,
+            a "proposal" and "decision" like ``ontolith.propose_batch``), or
+            "error" if no token was resolvable, it does not resolve to a
+            valid principal, the
             principal lacks propose capability, `concept` isn't declared in
             the active schema (KI-090), or `natural_key` is already taken
             within `concept` (KI-091).
@@ -388,8 +468,15 @@ def create_mcp_server(
             return _error_response(AuthError(token_error))
         assert token is not None  # _bearer_token: exactly one of (token, error) is set
         try:
-            author = auth_provider.resolve(token).id
-            entity = kb.create_entity(concept=concept, author=author, natural_key=natural_key)
+            caller = auth_provider.resolve(token)
+            if caller.kind == "ai":
+                proposal, decision = kb.propose_batch(
+                    [CreateEntityOp(key="entity", concept=concept, natural_key=natural_key)],
+                    caller.id,
+                    model=model,
+                )
+                return _batch_response(proposal, decision)
+            entity = kb.create_entity(concept=concept, author=caller.id, natural_key=natural_key)
         except OntolithError as exc:
             return _error_response(exc)
         return {
@@ -840,6 +927,74 @@ def create_mcp_server(
             },
             "decision": type(decision).__name__,
         }
+
+    # ------------------------------------------------------------------
+    # ontolith.propose_batch — several entities/facts as one proposal (ADR-0055)
+    # ------------------------------------------------------------------
+
+    @mcp.tool(name="ontolith.propose_batch")
+    def propose_batch_tool(
+        ops: list[dict[str, Any]],
+        token: str | None = None,
+        acting_as: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Propose several operations as ONE proposal, accepted or rejected
+        atomically (ADR-0055). Does NOT write directly.
+
+        Each entry of ``ops`` has an ``"op"`` of ``"create_entity"``,
+        ``"assert_literal"`` or ``"assert_ref"``:
+
+        - ``{"op": "create_entity", "key": "d1", "concept": "Decision",
+          "natural_key": null}`` declares a new entity named ``key``.
+        - ``{"op": "assert_literal", "subject": ..., "predicate": ...,
+          "value": ..., "value_type": ...}`` plus optional ``confidence``,
+          ``source``, ``rationale``, ``valid_from``, ``valid_to``,
+          ``supersedes``.
+        - ``{"op": "assert_ref", "subject": ..., "predicate": ...,
+          "target": ...}`` plus the same optional fields.
+
+        ``subject`` and ``target`` are a real entity id, or
+        ``{"local": "d1"}`` to refer to a ``create_entity`` declared earlier
+        in the same batch (no forward references, keys unique). New entity
+        ids are allocated when the proposal is accepted. 1 to 100 ops.
+
+        The server's ``PolicyStrategy`` is evaluated once per operation and
+        the strictest outcome wins. The acting principal is resolved from
+        ``token`` (ADR-0014). ``model`` is REQUIRED for an ``ai``-kind
+        principal and is recorded on every assertion of the batch.
+
+        Args:
+            ops: The operations, in application order
+            token: Bearer token identifying the calling principal (ADR-0014).
+                Optional: an ``Authorization`` header takes priority when the
+                transport supplies one (KI-067, see module docstring); this
+                argument is the fallback, and the only channel on stdio —
+                unless the server was created with ``require_header_token=True``
+                (KI-073), in which case this argument is never accepted and
+                stdio becomes unusable.
+            acting_as: Optional principal ID being acted on behalf of (delegation)
+            model: Model family+version; required when the calling principal is AI-kind
+
+        Returns:
+            Dict with "proposal" (id, state, policy_reason, decided_at,
+            acting_as, and "created_entities" — local key to entity id — once
+            the batch is applied) and "decision" type; or "error".
+        """
+        from ontolith.core.errors import AuthError
+
+        token, token_error = _bearer_token(token)
+        if token_error is not None:
+            return _error_response(AuthError(token_error))
+        assert token is not None  # _bearer_token: exactly one of (token, error) is set
+        try:
+            author = auth_provider.resolve(token).id
+            proposal, decision = kb.propose_batch(
+                _parse_batch_ops(ops), author, acting_as=acting_as, model=model
+            )
+        except OntolithError as exc:
+            return _error_response(exc)
+        return _batch_response(proposal, decision)
 
     # ------------------------------------------------------------------
     # ontolith.retract — propose retraction of an assertion (NOT a direct write)

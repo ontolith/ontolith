@@ -2461,19 +2461,19 @@ The same principal asserting `Item.name = "Bolt"` three times from the same sour
 
 ---
 
-## KI-116 — An AI principal can create entities without review
+## KI-116 — An AI principal could create entities without review ✓ RESOLVED (Backlog)
 
-**Severity:** Architecture gap — a rejected agent proposal leaves the entity it created behind, with no review trail
-**Milestone target:** Backlog
+**Severity:** Architecture gap — a rejected agent proposal left the entity it created behind, with no review trail
+**Milestone target:** Backlog — resolved without a milestone change
 **SPEC reference:** SPEC §9.5; ADR-0055, ADR-0008
 
 ### Description
 
-`Ontology.create_entity` only rejects `read`-only principals, so an `ai`-kind principal creates entities directly, and so does the MCP `ontolith.create_entity` tool. When a reviewer rejects the facts the agent proposed about that entity, the empty entity stays.
+`Ontology.create_entity` only rejected `read`-only principals, so an `ai`-kind principal created entities directly, and so did the MCP `ontolith.create_entity` tool. When a reviewer rejected the facts the agent proposed about that entity, the empty entity stayed.
 
 ### Fix
 
-Open. ADR-0055 §3: `create_entity` raises `CapabilityError` for an `ai`-kind author, and the MCP, REST and GraphQL entry points become a one-operation `propose_batch` for AI callers. Part 2 of the ADR-0055 implementation.
+`Ontology.create_entity` raises `CapabilityError` for an `ai`-kind author. For an AI caller, MCP `ontolith.create_entity` and REST `POST /entities` (202) stage a one-operation `propose_batch` and return the proposal; GraphQL `createEntity` rejects an AI caller and `proposeEntity` is its route. MCP gains `ontolith.propose_batch`. Behavior change for AI callers. Humans and services are unchanged. A plugin or importer running as an `ai` principal can no longer create entities (the plugin views offer no `propose_batch`); the CLI `entity create` with an AI author fails the same way.
 
 ---
 

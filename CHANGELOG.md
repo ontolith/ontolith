@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- MCP tool `ontolith.propose_batch` (propose tier, no direct write): several
+  entities and facts as one proposal. GraphQL `Mutation.proposeEntity`. An
+  optional `model` on MCP `ontolith.create_entity` and REST `POST /entities`
+  (required for AI callers). `Ontology.created_entities(proposal_id)`, and
+  `created_entities` on the REST and GraphQL propose responses.
 - `Ontology.propose_batch` stages 1 to 100 operations as one proposal, accepted or
   rejected atomically (ADR-0055, KI-115). New typed operations `CreateEntityOp`,
   `AssertLiteralOp`, `AssertRefOp` and `LocalRef` (exported from `ontolith`) let a
@@ -43,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently.
 
 ### Fixed
+- **Breaking:** an `ai`-kind principal can no longer create an entity directly
+  (ADR-0055, KI-116). `Ontology.create_entity` raises `CapabilityError` for it;
+  MCP `ontolith.create_entity` and REST `POST /entities` (202) stage a
+  one-operation batch and return the proposal instead of an entity, and GraphQL
+  `createEntity` rejects an AI caller in favor of the new `proposeEntity`
+  mutation. A rejected agent proposal no longer leaves an orphan entity. Human
+  and service principals are unchanged.
 - `Composite(all=...)` no longer turns a custom `Decision` subclass (neither accept,
   review nor reject) into an `AutoAccept`; it now requires review.
 - **Breaking:** writing an assertion identical to an existing `active` or

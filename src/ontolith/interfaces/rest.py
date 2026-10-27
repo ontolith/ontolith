@@ -41,7 +41,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, get_args
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -59,6 +59,7 @@ from ontolith.core.errors import (
     ValidationError,
 )
 from ontolith.govern.contradiction import ContradictionState
+from ontolith.govern.operations import CreateEntityOp
 from ontolith.govern.proposal import ProposalState
 from ontolith.identity import Principal
 
@@ -166,6 +167,9 @@ class CreateEntityIn(BaseModel):
 
     concept: str
     natural_key: str | None = None
+    model: str | None = None
+    """Model family+version; required when the caller is AI-kind (the
+    request then stages a one-operation batch, ADR-0055), ignored otherwise."""
 
 
 class EntityOut(BaseModel):
@@ -306,6 +310,9 @@ class ProposeOut(BaseModel):
 
     proposal: ProposalOut
     decision: str
+    created_entities: dict[str, str] | None = None
+    """Local key to entity id, for a batch that created entities and has
+    been applied (ADR-0055); `null` otherwise."""
 
 
 class WriteAssertionIn(BaseModel):
@@ -617,14 +624,46 @@ def create_rest_app(
     # POST /entities
     # ------------------------------------------------------------------
 
-    @app.post("/entities", status_code=201)
+    @app.post("/entities", status_code=201, responses={202: {"model": ProposeOut}})
     def create_entity_route(
         body: CreateEntityIn,
+        response: Response,
         principal: Principal = Depends(_resolve_principal),
-    ) -> EntityOut:
+    ) -> EntityOut | ProposeOut:
         """Create a new entity (KI-082). Propose-tier — same capability
         gate as every other governed write (`Ontology.create_entity`
-        rejects `read`-only principals)."""
+        rejects `read`-only principals).
+
+        An `ai`-kind caller does not create the entity directly: the
+        request stages a one-operation batch (ADR-0055) and the response is
+        202 with the proposal and decision, in `POST /proposals`'s shape
+        (whatever the decision: 202 means "handled as a proposal"). The same
+        route therefore returns an `EntityOut` or a `ProposeOut` by caller
+        kind; `model` is required for an AI caller. A `read`-only caller is
+        refused with 403 either way.
+        """
+        if principal.kind == "ai":
+            proposal, decision = kb.propose_batch(
+                [CreateEntityOp(key="entity", concept=body.concept, natural_key=body.natural_key)],
+                principal.id,
+                model=body.model,
+            )
+            response.status_code = 202
+            return ProposeOut(
+                proposal=ProposalOut(
+                    id=proposal.id,
+                    namespace=proposal.namespace,
+                    author=proposal.author,
+                    acting_as=proposal.acting_as,
+                    state=proposal.state,
+                    created_at=proposal.created_at.isoformat(),
+                    decided_at=proposal.decided_at.isoformat() if proposal.decided_at else None,
+                    policy_reason=proposal.policy_reason,
+                    reviewers=proposal.reviewers,
+                ),
+                decision=type(decision).__name__,
+                created_entities=kb.created_entities(proposal.id) or None,
+            )
         entity = kb.create_entity(
             concept=body.concept,
             author=principal.id,

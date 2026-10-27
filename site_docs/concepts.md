@@ -251,12 +251,14 @@ no plugin bypasses governance. See the
 
 ## The MCP surface has no write tool
 
-The Model Context Protocol server Ontolith ships exposes ten tools
-(`schema`, `get`, `create_entity`, `query`, `provenance`,
+The Model Context Protocol server Ontolith ships exposes eleven tools
+(`schema`, `get`, `create_entity`, `propose_batch`, `query`, `provenance`,
 `list_contradictions`, `propose`, `retract`, `flag_contradiction`,
 `resubmit`) — but **none of them is a direct-write tool**. Every
-write-shaped one (`create_entity`, `propose`, `retract`, `resubmit`) goes
-through the same governed proposal/policy path any other write does; there
-is no MCP tool that commits a value assertion unconditionally. An AI agent
-talking to a knowledge base through MCP can never bypass governance, full
-stop.
+write-shaped one (`propose_batch`, `propose`, `retract`, `resubmit`) goes
+through the same governed proposal/policy path any other write does, and
+so does `create_entity` when an AI agent calls it (it returns a proposal;
+other callers create the entity directly, since an entity is an identity
+anchor rather than a fact). There is no MCP tool that commits a value
+assertion unconditionally. An AI agent talking to a knowledge base through
+MCP can never bypass governance, full stop.

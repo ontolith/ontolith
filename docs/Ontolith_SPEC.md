@@ -657,7 +657,7 @@ The server **MUST NOT** expose a direct-write tool. `ontolith.propose` **MUST** 
 > **Implementation deviations.** The table above is abbreviated and has drifted from the shipped
 > tool set in places not yet reconciled row-by-row; `interfaces/mcp.py`'s own tool docstrings are
 > current. Notably: every tool also takes `token` (ADR-0014, omitted above for brevity); the
-> shipped set additionally includes `ontolith.create_entity` (KI-082), `ontolith.retract`
+> shipped set additionally includes `ontolith.create_entity` (KI-082; it returns a proposal for an AI caller, ADR-0055), `ontolith.propose_batch` (ADR-0055), `ontolith.retract`
 > (KI-057), `ontolith.list_contradictions` (KI-076), and `ontolith.resubmit` (KI-027), none listed
 > here; and `namespace` was removed from every tool's inputs (ADR-0043 — `Ontology` hardcodes one
 > namespace, so there was never anything to forward). The `ontolith.query` row above is current
