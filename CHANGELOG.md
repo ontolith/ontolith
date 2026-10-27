@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-27
+
+This minor release changes behavior in five places (marked **Breaking** below); none changes the
+public API surface (no export was removed or renamed, `griffe check` is clean) or the on-disk
+`format_version` (still `3`), and none needs a migration. Per ADR-0019 behavior-level changes ship
+in a minor release. What to check when upgrading:
+
+- Writing the same assertion twice is now a no-op that returns the first one (ADR-0054).
+- Resolving a contradiction keeps every member that agrees with the winning value (ADR-0053).
+- A reference write whose target is not the relation's declared concept now fails (KI-112).
+- An `ai`-kind principal cannot create an entity directly; it proposes one (ADR-0055). Agents
+  calling `Ontology.create_entity`, MCP `ontolith.create_entity` or REST `POST /entities` need to
+  pass `model` and handle a proposal in the response.
+- `ontolith.propose_batch` and `Ontology.propose_batch` are new (ADR-0055).
+
+### Security
+- Dependency bumps for published advisories: `filelock` 4.2.4, `certifi`, `strawberry-graphql`,
+  `urllib3`, `virtualenv`, `pyjwt`.
+
 ### Added
 - MCP tool `ontolith.propose_batch` (propose tier, no direct write): several
   entities and facts as one proposal. GraphQL `Mutation.proposeEntity`. An
@@ -1830,5 +1849,6 @@ new HIGH regressions, closed in a sixth PR.
 - Contribution guidelines and community health files
 - import-linter configuration for dependency rule enforcement
 
-[Unreleased]: https://github.com/ontolith/ontolith/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ontolith/ontolith/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ontolith/ontolith/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ontolith/ontolith/releases/tag/v1.0.0

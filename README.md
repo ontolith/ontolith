@@ -38,9 +38,9 @@ uv run python examples/quickstart.py
 
 ## Development Status
 
-✅ **v1.0.0** - M0–M4 complete; tagged 2026-09-28
+✅ **v1.1.0** - M0–M4 complete; 1.0.0 tagged 2026-09-28
 
-Not yet published to PyPI — install from source (see Quick Start above). See [docs/Ontolith_Implementation_Plan.md](docs/Ontolith_Implementation_Plan.md) for the full milestone history and [vNext](docs/Ontolith_Implementation_Plan.md) plans.
+Install with `pip install ontolith` (see Quick Start above). See [docs/Ontolith_Implementation_Plan.md](docs/Ontolith_Implementation_Plan.md) for the full milestone history and [vNext](docs/Ontolith_Implementation_Plan.md) plans.
 
 ## Documentation
 
