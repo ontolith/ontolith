@@ -70,7 +70,7 @@ Ontolith isn't published to PyPI yet — install from source (requires
 
 ## Project status
 
-Ontolith is at **v1.0.0** — M0 through M4 of the
+Ontolith is at **v1.1.0** — M0 through M4 of the
 [Implementation Plan](https://github.com/ontolith/ontolith/blob/main/docs/Ontolith_Implementation_Plan.md)
 are complete: substrate, collaboration, extensibility, and production
 hardening (performance budgets, a full security review, an audited and

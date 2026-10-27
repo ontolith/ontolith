@@ -1,6 +1,6 @@
 [project]
 name = "ontolith"
-version = "1.0.0"
+version = "1.1.0"
 description = "A Python framework for collaborative knowledge bases where humans and AI agents are co-equal authors"
 authors = [{ name = "Matheus B. Vicari", email = "matheus.boni.vicari@gmail.com" }]
 readme = "README.md"
