@@ -2620,13 +2620,14 @@ class Ontology:
                         )
                     if existing_member.status in ("retracted", "superseded"):
                         continue
-                    # Extending an already-open contradiction re-flags members
-                    # that are already flagged (idempotent status write) — only
-                    # emit an event for an actual transition, not a no-op.
+                    # Only emit an event for an actual transition, not a no-op;
+                    # and since the read above already holds the member's
+                    # status, a member that is already flagged needs no write.
                     already_flagged = mid in (
                         open_contradiction.member_ids if open_contradiction else []
                     )
-                    self.backend.set_assertion_status(mid, "flagged")
+                    if existing_member.status != "flagged":
+                        self.backend.set_assertion_status(mid, "flagged")
                     if not already_flagged:
                         self._record_assertion_event(
                             mid, assertion.author, "flagged", assertion.asserted_at

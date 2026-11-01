@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Extending an open contradiction no longer rewrites the status of members that are already
+  `flagged`, which lowers the cost of a write that lands in a large contradiction (KI-100, part b).
+  No behavior change: statuses and events are as before.
+
 ## [1.1.0] - 2026-10-27
 
 This minor release changes behavior in five places (marked **Breaking** below); none changes the
