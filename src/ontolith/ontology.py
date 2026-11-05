@@ -46,11 +46,19 @@ from ontolith.govern.operations import (
 from ontolith.govern.policy import Decision, PolicyStrategy, Reject, RequireReview
 from ontolith.govern.proposal import Proposal, ProposalEvent
 from ontolith.govern.provenance import Provenance
-from ontolith.identity import AdminEvent, Principal, PrincipalCredential, min_capability
+from ontolith.identity import (
+    AdminEvent,
+    ErasureMode,
+    ErasureRecord,
+    Principal,
+    PrincipalCredential,
+    min_capability,
+)
 from ontolith.identity.admin_event import AdminAction
 from ontolith.query import QueryBuilder
 from ontolith.schema import SchemaIR
 from ontolith.store.base import DEFAULT_NAMESPACE, StorageBackend
+from ontolith.store.redaction import RedactionBackend
 
 if TYPE_CHECKING:
     from ontolith.plugins.ports import Validator
@@ -226,6 +234,7 @@ class Ontology:
         validators: Sequence["Validator"] | None = None,
         completeness_validators: Sequence["Validator"] | None = None,
         observability: ObservabilitySink | None = None,
+        erasure: ErasureMode | None = None,
     ) -> None:
         """Initialize Ontology with a storage backend.
 
@@ -266,6 +275,12 @@ class Ontology:
                 `RequiredFieldsValidator` need: an entity is incomplete by
                 construction after every write but its last, so it cannot
                 be gated per-assertion.
+            erasure: Erasure mode (ADR-0056). `None` uses the mode the
+                knowledge base already has (`strict` for a new one). Naming
+                the mode a new, empty knowledge base should have records it;
+                naming a different mode than an existing one has raises, so
+                a typo cannot change the guarantee. Use `enable_redaction`
+                to move an existing `strict` knowledge base to `redaction`.
         """
         self.backend = backend
         self.clock = clock or SystemClock()
@@ -278,6 +293,75 @@ class Ontology:
         self.completeness_validators: Sequence[Validator] = (
             list(completeness_validators) if completeness_validators else []
         )
+        self._apply_requested_erasure_mode(erasure)
+
+    @property
+    def erasure_mode(self) -> ErasureMode:
+        """The knowledge base's stored erasure mode (ADR-0056)."""
+        if isinstance(self.backend, RedactionBackend):
+            return self.backend.erasure_mode()
+        return "strict"
+
+    def _apply_requested_erasure_mode(self, requested: ErasureMode | None) -> None:
+        """Reconcile the `erasure` argument with the stored mode (ADR-0056)."""
+        stored = self.erasure_mode
+        if requested is None or requested == stored:
+            return
+        if stored == "redaction":
+            raise ValidationError(
+                "This knowledge base is in redaction mode, which cannot be switched back to strict"
+            )
+        # Asking a strict knowledge base for redaction: only a new, empty one
+        # takes the mode from the argument; an existing one needs the
+        # audited, admin-gated `enable_redaction`. The backend checks
+        # emptiness in the same transaction as the write.
+        self._store_redaction(actor="kb-setup", require_empty=True)
+
+    def _require_redaction_capable_backend(self) -> RedactionBackend:
+        if not isinstance(self.backend, RedactionBackend):
+            raise ValidationError(
+                f"{type(self.backend).__name__} does not support redaction mode (ADR-0056)"
+            )
+        return self.backend
+
+    def _store_redaction(self, *, actor: str, require_empty: bool = False) -> None:
+        backend = self._require_redaction_capable_backend()
+        backend.enable_redaction(
+            ErasureRecord(
+                id=self.id_provider.next(),
+                kind="enabled",
+                actor=actor,
+                at=self.clock.now(),
+            ),
+            require_empty=require_empty,
+        )
+
+    def enable_redaction(self, actor: str) -> None:
+        """Move this knowledge base from `strict` to `redaction` mode (ADR-0056).
+
+        One-way: nothing returns a knowledge base to `strict`, because after
+        the first erasure the strict guarantee no longer holds for it. Already
+        in redaction mode is a no-op. The change is recorded in an append-only
+        erasure record. Cannot be called from inside an open transaction.
+
+        Args:
+            actor: Principal making the change — a human holding `admin`
+
+        Raises:
+            AuthError: `actor` does not name an existing principal
+            CapabilityError: `actor` lacks `admin`, or is not a human principal
+            ValidationError: the storage backend does not support redaction mode
+        """
+        principal = self.require_admin(actor)
+        if principal.kind != "human":
+            raise CapabilityError(
+                f"Principal {actor!r} is a {principal.kind} principal; "
+                "only a human admin can enable redaction mode"
+            )
+        self._require_redaction_capable_backend()
+        if self.erasure_mode == "redaction":
+            return
+        self._store_redaction(actor=actor)
 
     @classmethod
     def connect(
@@ -291,6 +375,7 @@ class Ontology:
         validators: Sequence["Validator"] | None = None,
         completeness_validators: Sequence["Validator"] | None = None,
         observability: ObservabilitySink | None = None,
+        erasure: ErasureMode | None = None,
     ) -> "Ontology":
         """Connect to a knowledge base.
 
@@ -307,6 +392,7 @@ class Ontology:
                 see `__init__` (KI-041, ADR-0029)
             observability: Optional ObservabilitySink — see `__init__`
                 (SPEC §18, ADR-0044)
+            erasure: Erasure mode — see `__init__` (ADR-0056)
 
         Returns:
             Ontology instance connected to the database
@@ -315,16 +401,22 @@ class Ontology:
 
         effective_clock = clock or SystemClock()
         backend = SQLiteBackend(path, clock=effective_clock)
-        return cls(
-            backend,
-            clock=effective_clock,
-            id_provider=id_provider,
-            policy=policy,
-            embedder=embedder,
-            validators=validators,
-            completeness_validators=completeness_validators,
-            observability=observability,
-        )
+        try:
+            return cls(
+                backend,
+                clock=effective_clock,
+                id_provider=id_provider,
+                policy=policy,
+                embedder=embedder,
+                validators=validators,
+                completeness_validators=completeness_validators,
+                observability=observability,
+                erasure=erasure,
+            )
+        except BaseException:
+            # A mode mismatch must not leave the SQLite connection open.
+            backend.close()
+            raise
 
     def create_principal(
         self,

@@ -29,6 +29,7 @@ working one.
 
 from ontolith.identity.admin_event import AdminAction, AdminEvent
 from ontolith.identity.credential import PrincipalCredential
+from ontolith.identity.erasure import ErasureMode, ErasureRecord
 from ontolith.identity.ports import AuthProvider
 from ontolith.identity.principal import Principal, min_capability
 from ontolith.identity.token_auth import TokenAuthProvider, hash_token
@@ -37,6 +38,8 @@ __all__ = [
     "AdminAction",
     "AdminEvent",
     "AuthProvider",
+    "ErasureMode",
+    "ErasureRecord",
     "Principal",
     "PrincipalCredential",
     "TokenAuthProvider",

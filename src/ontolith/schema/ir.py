@@ -18,6 +18,8 @@ class PropertyDef(BaseModel):
         cardinality: Single value or many (SPEC §6)
         required: Whether the property is required
         temporality: How conflicts are handled (static vs time_varying)
+        personal: Whether the value can identify a person, so a redaction-mode
+            knowledge base can erase it (ADR-0056). Has no effect otherwise.
         description: Optional description
     """
 
@@ -26,6 +28,7 @@ class PropertyDef(BaseModel):
     cardinality: Literal["single", "many"] = "single"
     required: bool = False
     temporality: Literal["static", "time_varying"] = "static"
+    personal: bool = False
     description: str | None = None
 
     model_config = {"frozen": True}
@@ -68,12 +71,15 @@ class ConceptDef(BaseModel):
         name: Concept name (e.g., "Person", "Organization")
         properties: Property definitions
         relations: Relation definitions
+        personal_key: Whether an entity's natural key can identify a person
+            (ADR-0056)
         description: Optional description
     """
 
     name: str
     properties: dict[str, PropertyDef] = Field(default_factory=dict)
     relations: dict[str, RelationDef] = Field(default_factory=dict)
+    personal_key: bool = False
     description: str | None = None
 
     model_config = {"frozen": True}

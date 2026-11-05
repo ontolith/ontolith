@@ -24,7 +24,7 @@ from ontolith.core import Assertion, AssertionEvent, Clock, Entity, Namespace, S
 from ontolith.core.errors import StorageError, ValidationError
 from ontolith.govern.contradiction import Contradiction
 from ontolith.govern.proposal import Proposal, ProposalEvent
-from ontolith.identity import AdminEvent, Principal, PrincipalCredential
+from ontolith.identity import AdminEvent, ErasureMode, ErasureRecord, Principal, PrincipalCredential
 from ontolith.schema import SchemaIR
 from ontolith.store.base import DEFAULT_NAMESPACE, VECTOR_SCOPES
 from ontolith.store.sqlite import migrations
@@ -371,6 +371,80 @@ class SQLiteBackend:
             WHEN EXISTS(SELECT 1 FROM assertion_event WHERE id = NEW.id)
             BEGIN
                 SELECT RAISE(ABORT, 'assertion_event is append-only: REPLACE is not permitted');
+            END
+        """)
+
+        # ADR-0056: the erasure mode and the record of redaction being
+        # enabled (and, later, of each erasure). Both are append-only at the
+        # store level, like the other audit tables (KI-066), so no raw
+        # connection can edit them. The mode is the newest `erasure_mode`
+        # row; no row means `strict`. A `strict` row is refused, which makes
+        # the switch one-way, and a `redaction` row needs the `enabled`
+        # erasure_record with the same id. Both tables are WITHOUT ROWID: the
+        # REPLACE trigger keys on `id`, and a REPLACE that collided on
+        # `rowid` instead would delete a row without firing the delete
+        # trigger (the connection-level `recursive_triggers` pragma that would
+        # otherwise stop it is not stored in the file).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS kb_setting (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                at TEXT NOT NULL,
+                actor TEXT NOT NULL
+            ) WITHOUT ROWID
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS erasure_record (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK(kind IN ('enabled', 'erased')),
+                actor TEXT NOT NULL,
+                at TEXT NOT NULL,
+                subject TEXT,
+                reason TEXT,
+                detail TEXT
+            ) WITHOUT ROWID
+        """)
+        for table in ("kb_setting", "erasure_record"):
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_no_update
+                BEFORE UPDATE ON {table}
+                BEGIN
+                    SELECT RAISE(ABORT, '{table} is append-only: UPDATE is not permitted');
+                END
+            """)
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_no_delete
+                BEFORE DELETE ON {table}
+                BEGIN
+                    SELECT RAISE(ABORT, '{table} is append-only: DELETE is not permitted');
+                END
+            """)
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_no_replace
+                BEFORE INSERT ON {table}
+                WHEN EXISTS(SELECT 1 FROM {table} WHERE id = NEW.id)
+                BEGIN
+                    SELECT RAISE(ABORT, '{table} is append-only: REPLACE is not permitted');
+                END
+            """)
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_kb_setting_erasure_mode_needs_record
+            BEFORE INSERT ON kb_setting
+            WHEN NEW.key = 'erasure_mode' AND NEW.value = 'redaction'
+                AND NOT EXISTS(
+                    SELECT 1 FROM erasure_record WHERE id = NEW.id AND kind = 'enabled'
+                )
+            BEGIN
+                SELECT RAISE(ABORT, 'erasure_mode needs a matching enabled erasure_record');
+            END
+        """)
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_kb_setting_erasure_mode_one_way
+            BEFORE INSERT ON kb_setting
+            WHEN NEW.key = 'erasure_mode' AND NEW.value <> 'redaction'
+            BEGIN
+                SELECT RAISE(ABORT, 'erasure_mode is one-way: only redaction can be recorded');
             END
         """)
 
@@ -1065,6 +1139,87 @@ class SQLiteBackend:
             # Already revoked - no-op, first revocation's attribution stands.
         if not self._in_transaction:
             self.conn.commit()
+
+    @_synchronized
+    def erasure_mode(self) -> ErasureMode:
+        """The stored erasure mode (ADR-0056); `strict` when never recorded."""
+        try:
+            row = self.conn.execute(
+                "SELECT 1 FROM kb_setting WHERE key = 'erasure_mode' AND value = 'redaction'"
+            ).fetchone()
+        except sqlite3.Error as e:
+            raise StorageError(f"Failed to read the erasure mode: {e}") from e
+        return "redaction" if row is not None else "strict"
+
+    @_synchronized
+    def enable_redaction(self, record: ErasureRecord, *, require_empty: bool = False) -> None:
+        """Store the mode `redaction` and append `record`, atomically."""
+        if record.kind != "enabled":
+            raise ValidationError(
+                f"enable_redaction needs an 'enabled' record, got {record.kind!r}"
+            )
+        try:
+            with self.transaction():
+                if self.erasure_mode() == "redaction":
+                    return
+                if require_empty and not self._is_empty():
+                    raise ValidationError(
+                        "This knowledge base already has data and is in strict mode; "
+                        "use enable_redaction() to move it to redaction mode"
+                    )
+                self._insert_erasure_record(record)
+                self.conn.execute(
+                    "INSERT INTO kb_setting (id, key, value, at, actor) "
+                    "VALUES (?, 'erasure_mode', 'redaction', ?, ?)",
+                    (record.id, record.at.isoformat(), record.actor),
+                )
+        except sqlite3.Error as e:
+            raise StorageError(f"Failed to enable redaction: {e}") from e
+
+    def _is_empty(self) -> bool:
+        """True when no principal, entity, assertion, proposal or schema exists."""
+        return all(
+            self.conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is None  # noqa: S608
+            for table in ("principal", "entity", "assertion", "proposal", "schema_version")
+        )
+
+    def _insert_erasure_record(self, record: ErasureRecord) -> None:
+        self.conn.execute(
+            "INSERT INTO erasure_record (id, kind, actor, at, subject, reason, detail) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                record.id,
+                record.kind,
+                record.actor,
+                record.at.isoformat(),
+                record.subject,
+                record.reason,
+                record.detail,
+            ),
+        )
+
+    @_synchronized
+    def erasure_records(self) -> list[ErasureRecord]:
+        """Every erasure record, oldest first."""
+        try:
+            rows = self.conn.execute(
+                "SELECT id, kind, actor, at, subject, reason, detail "
+                "FROM erasure_record ORDER BY at, id"
+            ).fetchall()
+        except sqlite3.Error as e:
+            raise StorageError(f"Failed to read erasure records: {e}") from e
+        return [
+            ErasureRecord(
+                id=r[0],
+                kind=r[1],
+                actor=r[2],
+                at=datetime.fromisoformat(r[3]),
+                subject=r[4],
+                reason=r[5],
+                detail=r[6],
+            )
+            for r in rows
+        ]
 
     @_synchronized
     def put_admin_event(self, event: AdminEvent) -> None:

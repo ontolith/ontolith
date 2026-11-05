@@ -2477,6 +2477,22 @@ The same principal asserting `Item.name = "Bolt"` three times from the same sour
 
 ---
 
+## KI-117 — A REPLACE that collides on `rowid` bypasses the append-only triggers on the older audit tables
+
+**Severity:** Architecture gap — a raw-connection bypass of a store-level guarantee
+**Milestone target:** Backlog
+**SPEC reference:** SPEC §17 (the audit trail MUST NOT be mutable); KI-066
+
+### Description
+
+`assertion_event`, `proposal_event` and `admin_event` are protected by `BEFORE UPDATE`, `BEFORE DELETE` and, for `REPLACE`, a `BEFORE INSERT ... WHEN EXISTS(SELECT 1 ... WHERE id = NEW.id)` trigger. That last trigger only sees a collision on `id`. A statement such as `INSERT OR REPLACE INTO admin_event(rowid, id, ...) VALUES (1, 'new-id', ...)` collides on `rowid` instead, so SQLite removes the old row without firing the delete trigger whenever `PRAGMA recursive_triggers` is off. That pragma is per-connection, not stored in the file, so a second raw connection to the same file opens with it off. Found while reviewing the ADR-0056 tables, which avoid it by being `WITHOUT ROWID`.
+
+### Fix
+
+These tables already exist in deployed files, so `WITHOUT ROWID` cannot be applied in place. Add a guard to the REPLACE trigger on `rowid` as well (for example `WHEN EXISTS(SELECT 1 ... WHERE id = NEW.id OR rowid = NEW.rowid)`), created with `CREATE TRIGGER IF NOT EXISTS` under a new name so existing files pick it up on open, and add a test per table that a rowid-colliding REPLACE is refused. DuckDB has no triggers at all, so it is unaffected by this entry and covered by its own documented limitation.
+
+---
+
 ## Format
 
 Each entry follows this structure:

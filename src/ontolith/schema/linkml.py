@@ -106,6 +106,8 @@ _UNSUPPORTED_SLOT_KEYS = (
 _SUPPORTED_METADATA_KEYS = ("prefixes", "default_prefix", "description")
 
 _TEMPORALITY_ANNOTATION_KEY = "ontolith_temporality"
+_PERSONAL_ANNOTATION_KEY = "ontolith_personal"
+_PERSONAL_KEY_ANNOTATION_KEY = "ontolith_personal_key"
 _VALUE_TYPE_ANNOTATION_KEY = "ontolith_value_type"
 
 # value_types whose LinkML `range` mapping is ambiguous with another value_type
@@ -148,6 +150,8 @@ def to_yaml(schema: SchemaIR) -> str:
         class_doc: dict[str, Any] = {}
         if concept.description:
             class_doc["description"] = concept.description
+        if concept.personal_key:
+            class_doc["annotations"] = {_PERSONAL_KEY_ANNOTATION_KEY: "true"}
 
         attributes: dict[str, Any] = {}
         for prop_name in concept.properties:
@@ -174,6 +178,8 @@ def _property_to_slot(prop: PropertyDef) -> dict[str, Any]:
     annotations: dict[str, str] = {}
     if prop.temporality != "static":
         annotations[_TEMPORALITY_ANNOTATION_KEY] = prop.temporality
+    if prop.personal:
+        annotations[_PERSONAL_ANNOTATION_KEY] = "true"
     if prop.value_type in _AMBIGUOUS_RANGE_VALUE_TYPES:
         # range: string is shared by Text and JSON — disambiguate explicitly.
         annotations[_VALUE_TYPE_ANNOTATION_KEY] = prop.value_type
@@ -319,6 +325,11 @@ def _parse_class(
         temporality = cast(_Temporality, raw_temporality)
 
         if range_value in known_class_names:
+            if isinstance(annotations, dict) and _PERSONAL_ANNOTATION_KEY in annotations:
+                raise SchemaError(
+                    f"{class_name}.{slot_name}: {_PERSONAL_ANNOTATION_KEY} is not supported on "
+                    "a relation (only properties can be marked personal)"
+                )
             relations[slot_name] = RelationDef(
                 name=slot_name,
                 target_concept=range_value,
@@ -351,6 +362,9 @@ def _parse_class(
                 cardinality=cardinality,
                 required=required,
                 temporality=temporality,
+                personal=_annotation_flag(
+                    annotations, _PERSONAL_ANNOTATION_KEY, f"{class_name}.{slot_name}"
+                ),
                 description=slot_description,
             )
         else:
@@ -360,8 +374,25 @@ def _parse_class(
             )
 
     return ConceptDef(
-        name=class_name, properties=properties, relations=relations, description=description
+        name=class_name,
+        properties=properties,
+        relations=relations,
+        personal_key=_annotation_flag(
+            class_doc.get("annotations"), _PERSONAL_KEY_ANNOTATION_KEY, f"Class {class_name!r}"
+        ),
+        description=description,
     )
 
 
-__all__ = ["to_yaml", "from_yaml"]
+def _annotation_flag(annotations: Any, key: str, where: str) -> bool:
+    """Read a boolean LinkML annotation, written as the string "true"/"false"
+    (what this module emits) or a YAML boolean. Anything else raises: for a
+    privacy mark, a typo that silently reads as "not personal" is the
+    dangerous direction."""
+    if not isinstance(annotations, dict) or key not in annotations:
+        return False
+    value = annotations[key]
+    text = str(value).lower() if isinstance(value, (str, bool)) else None
+    if text not in ("true", "false"):
+        raise SchemaError(f"{where}: invalid {key} annotation value {value!r} (use true or false)")
+    return text == "true"

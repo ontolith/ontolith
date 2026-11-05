@@ -72,6 +72,7 @@ class _PropertySpec:
     required: bool | None
     temporality: Temporality
     description: str | None
+    personal: bool = False
 
 
 def Relation(
@@ -107,6 +108,7 @@ def Property(
     required: bool | None = None,
     temporality: Temporality = "static",
     description: str | None = None,
+    personal: bool = False,
 ) -> Any:
     """Field spec for a property, used as a class-body default.
 
@@ -119,14 +121,19 @@ def Property(
     `Property(...)` spec were attached at all. Pass `required=True`/`False`
     explicitly only to override what the annotation itself already states.
 
+    `personal=True` marks a value that can identify a person, so a knowledge
+    base in redaction mode can erase it (ADR-0056). It changes nothing else.
+
     Example:
         salary: Integer = Property(temporality="time_varying")
+        email: Text = Property(personal=True)
     """
     return _PropertySpec(
         cardinality=cardinality,
         required=required,
         temporality=temporality,
         description=description,
+        personal=personal,
     )
 
 
@@ -264,6 +271,7 @@ class ConceptMeta(type):
                         cardinality=default.cardinality,
                         required=required,
                         temporality=default.temporality,
+                        personal=default.personal,
                         description=default.description,
                     )
                 else:
@@ -282,6 +290,7 @@ class ConceptMeta(type):
             name=name,
             properties=properties,
             relations=relations,
+            personal_key=bool(namespace.get("__personal_key__", False)),
             description=(namespace.get("__doc__") or None),
         )
         return cls
@@ -362,6 +371,8 @@ def _property_annotation(prop: PropertyDef) -> str:
         non_default_args.append(f"cardinality={prop.cardinality!r}")
     if prop.temporality != "static":
         non_default_args.append(f"temporality={prop.temporality!r}")
+    if prop.personal:
+        non_default_args.append("personal=True")
     if prop.description:
         non_default_args.append(f"description={prop.description!r}")
 
@@ -416,6 +427,8 @@ def generate_class_stubs(schema: SchemaIR) -> str:
             # repr(), not a raw triple-quoted string: a description containing
             # quotes or backslashes would otherwise produce invalid Python.
             body_lines.append(f"    {concept.description!r}")
+        if concept.personal_key:
+            body_lines.append("    __personal_key__ = True")
         for prop_name in concept.properties:
             prop = concept.properties[prop_name]
             body_lines.append(f"    {prop_name}: {_property_annotation(prop)}")
