@@ -1351,7 +1351,7 @@ class SQLiteBackend:
         if busy or log != done:
             return (
                 "the write-ahead log could not be fully checkpointed because another "
-                "connection is reading; erased bytes may remain in the -wal file until "
+                "connection is reading; erased bytes may remain in the database or -wal file until "
                 "readers finish and erase_subject (or compact) is run again"
             )
         return None

@@ -341,6 +341,7 @@ def create_mcp_server(
                             "cardinality": prop_def.cardinality,
                             "temporality": prop_def.temporality,
                             "required": prop_def.required,
+                            "personal": prop_def.personal,
                         }
                         for prop_name, prop_def in concept_def.properties.items()
                     ],
@@ -688,6 +689,7 @@ def create_mcp_server(
             "value": a.value,
             "value_type": a.value_type,
             "status": a.status,
+            "redacted": a.redacted,
             "author": a.author,
             "confidence": a.confidence,
             "source": a.source,

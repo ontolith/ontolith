@@ -132,7 +132,12 @@ Decisions made while building it:
 - **A `redaction` row needs its record.** The store refuses an `erasure_mode = redaction` row unless an `enabled` `erasure_record` with the same id exists, so no raw insert can turn the mode on without leaving an audit record.
 - **A schema mark that cannot be read is an error.** The LinkML `ontolith_personal` annotation accepts only `true` or `false`; anything else, or the annotation on a relation, raises `SchemaError`, because a typo that reads as "not personal" is the unsafe direction.
 
-Still to come after part 2: the DuckDB decision, the CLI command and the SPEC notes (part 3).
+## Update (2026-11-06): implementation, part 3
+
+Landed: the DuckDB decision, `ontolith redaction status|enable` and `ontolith entity erase` (a confirmation prompt unless `--yes`; exit 1 with a warning when compaction is incomplete), the `personal` mark in the REST, GraphQL, MCP and CLI schema views, the `redacted` flag in the REST, GraphQL and MCP provenance views, the SPEC §5.3, §7 and §17 notes, and the README and concepts page.
+
+- **DuckDB does not implement the capability.** The spike wrote a distinctive value, nulled it and then tried `CHECKPOINT`, `VACUUM`, closing and reopening, and rebuilding the table (`CREATE TABLE ... AS`, drop, rename). In every case the bytes stayed in the database file. Only copying the whole database into a fresh file (`COPY FROM DATABASE`) left them out, and swapping the file under a live connection is not something this backend can do safely. Redaction is never offered with a weaker promise, so DuckDB stays strict and `erasure="redaction"` on it raises.
+- **MCP has no erase tool,** as for every write: erasure is a human admin action through the SDK or the CLI.
 
 ## Update (2026-11-06): implementation, part 2
 

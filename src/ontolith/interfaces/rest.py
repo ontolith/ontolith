@@ -108,6 +108,8 @@ class PropertyOut(BaseModel):
     cardinality: str
     temporality: str
     required: bool
+    personal: bool = False
+    """Whether the value can identify a person and is erased in redaction mode (ADR-0056)."""
 
 
 class RelationOut(BaseModel):
@@ -253,6 +255,8 @@ class ProvenanceOut(BaseModel):
     value: str
     value_type: str | None
     status: str
+    redacted: bool = False
+    """True when the personal value was erased (ADR-0056); `value` is then empty."""
     author: str
     confidence: float | None
     source: str | None
@@ -601,6 +605,7 @@ def create_rest_app(
                         cardinality=prop_def.cardinality,
                         temporality=prop_def.temporality,
                         required=prop_def.required,
+                        personal=prop_def.personal,
                     )
                     for prop_name, prop_def in concept_def.properties.items()
                 ],
@@ -780,6 +785,7 @@ def create_rest_app(
             value=a.value,
             value_type=a.value_type,
             status=a.status,
+            redacted=a.redacted,
             author=a.author,
             confidence=a.confidence,
             source=a.source,

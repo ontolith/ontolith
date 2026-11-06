@@ -62,7 +62,7 @@ A conforming implementation **MUST** keep the storage layer behind the backend i
 | Principal (ai/service) | slug `[a-z0-9-]{1,64}` | — |
 | Schema version | integer, per namespace, monotonic | — |
 
-IDs **MUST** be treated as opaque by clients. Assertions are **append-only**: an assertion record is never mutated except for its `status`, `valid_to`, and `supersedes`/successor links (§7, §10).
+IDs **MUST** be treated as opaque by clients. Assertions are **append-only**: an assertion record is never mutated except for its `status`, `valid_to`, and `supersedes`/successor links (§7, §10). The one exception is a knowledge base in the opt-in `redaction` mode (§17): erasing a person's data removes the marked personal values from their assertions and related records (details in §17).
 
 ---
 
@@ -214,7 +214,7 @@ The IR for a namespace is a JSON document:
 ## 7. Assertion & provenance semantics
 
 1. Assertions are **append-only**. The only mutable fields are `status`, `valid_to`, and successor/`supersedes` links.
-2. Creating an attribute value, updating it, or retracting it all produce **new** assertion records (or status changes), never in-place edits of the value.
+2. Creating an attribute value, updating it, or retracting it all produce **new** assertion records (or status changes), never in-place edits of the value. In `strict` mode (the default) this holds without exception. In `redaction` mode an authorised erasure (§17) removes the marked personal value of an assertion (and its `source` and `rationale`), replaces its `metadata` with a redaction marker, and retracts it; an audit record of the erasure is kept.
 3. `confidence` semantics: it is the **author's stated belief**, distinct from any future system-derived score. NULL means "unspecified," which policy **MAY** treat as below any threshold.
 4. For `ai` authors, the resolving layer **MUST** capture `model` (family+version) at assertion time.
 5. Validity: an assertion with `valid_to = NULL` and `status = active` is **currently asserted**. Time-travel (§11.4) reconstructs state by `valid_from/valid_to` and `asserted_at`.
@@ -694,7 +694,8 @@ Errors **MUST** carry a stable `code`, a human message, and structured `detail`.
 - **Authz**: every operation **MUST** be capability-checked (§8.3) against the resolved principal (and `acting_as`).
 - **Agent safety**: agents reach the KB only via `read`/`propose`/`flag_contradiction`; `write` requires an explicit grant.
 - **Plugin sandboxing**: third-party plugins run with a declared capability manifest; the runtime **SHOULD** isolate execution and **MUST** deny undeclared access (storage, network, filesystem).
-- **Audit**: all writes, proposal decisions, and resolutions are append-only and attributable; the audit trail **MUST NOT** be mutable.
+- **Audit**: all writes, proposal decisions, and resolutions are append-only and attributable; the audit trail **MUST NOT** be mutable. This is unconditional in `strict` mode. In `redaction` mode the audit tables stay immutable. An erasure alters only: the marked value, `source`, `rationale`, `metadata` and status of the subject's assertions; the entity's natural key when the schema marks it personal; the payload of proposals carrying the value, and the state of pending ones (rejected as `erased`); the state, resolver and `metadata` of contradictions on the subject's personal predicates; and the vector index. Each erasure is recorded in an append-only erasure record.
+- **Erasure (opt-in)**: a knowledge base is `strict` (default) or `redaction`, chosen at creation or enabled once and irreversibly. In `redaction` mode only a human principal holding `admin` can erase a subject, and only the values a schema marks `personal`. Erasure removes the bytes from the storage file, not only the rows (if another process holds the file open for reading the cleanup can be incomplete, which is reported, and repeating the erasure finishes it); a storage backend that cannot do so **MUST NOT** offer the mode. Backups, exports, unmarked free text and logs are out of scope (ADR-0056).
 - **Data ownership**: the default deployment keeps all data in a single local file with no external dependency.
 
 ---
