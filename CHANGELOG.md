@@ -7,31 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-06
+
+This minor release adds an opt-in redaction mode. Nothing changes for a knowledge base that does not
+use it: the default stays `strict` and append-only without exception, no export was removed or
+renamed (`griffe check` is clean), and the on-disk `format_version` is unchanged (still `3`), so no
+migration is needed. Opening a file with this release adds two empty tables (`kb_setting` and
+`erasure_record`).
+
 ### Added
-- Opt-in redaction mode, part 1 (ADR-0056). A knowledge base is `strict` (the default, unchanged)
-  or `redaction`. `Ontology.connect(path, erasure="redaction")` creates a new knowledge base in
-  redaction mode, `Ontology.erasure_mode` reads the stored mode, and `Ontology.enable_redaction`
-  moves an existing one over (a human `admin`, one-way, recorded). Schemas can mark a property
-  `personal` (`Property(personal=True)`) and a concept's natural key `personal_key`, in the class
-  DSL, generated stubs and LinkML YAML. Nothing is erased yet: the erasure operation follows in a
-  later release. Adds the `kb_setting` and `erasure_record` tables (append-only, created on open;
-  no `format_version` change and no migration) and an optional `RedactionBackend` protocol.
-  SQLite only; DuckDB stays strict.
-- Opt-in redaction mode, part 2 (ADR-0056). In redaction mode a human `admin` can call
-  `Ontology.erase_subject(entity_id, actor=..., reason=...)`. Values of `personal` properties
-  become NULL and their assertions are retracted; pending proposals that carry them are rejected
-  as "erased" and every proposal payload is blanked; affected contradictions are closed with no
-  winner; the entity's vectors are rebuilt out of the index; and the bytes are removed from the
-  database file (`secure_delete`, WAL checkpoint, `VACUUM`). Adds `ErasureResult`,
-  `RedactionPlan`, `ProposalRedaction`, `ErasureCounts` and `Assertion.redacted`. A redacted
-  assertion reads with an empty `value`. Strict mode is unchanged and still refuses any erasure.
-- Opt-in redaction mode, part 3 (ADR-0056). `ontolith redaction status|enable` and
-  `ontolith entity erase`; the schema views of the CLI, REST, GraphQL and MCP show which properties
-  are `personal`, and the provenance views show a `redacted` flag. Both are additive. The DuckDB
-  backend does not support redaction mode: it cannot remove old bytes from its file in place.
-  **Upgrade note:** a file moved to redaction mode must not be opened with a release older than
-  the one that introduces the mode. There is no `format_version` change, so an older release opens
-  it without complaint and treats it as `strict`.
+- **Opt-in redaction mode (ADR-0056).** A knowledge base is `strict` (the default) or `redaction`.
+  `Ontology.connect(path, erasure="redaction")` creates a new knowledge base in redaction mode,
+  `Ontology.erasure_mode` reads the stored mode, and `Ontology.enable_redaction` moves an existing
+  one over (a human `admin`; one-way; recorded in an append-only erasure record).
+- Schemas mark a property `personal` (`Property(personal=True)`) and a concept's natural key
+  `personal_key` (`__personal_key__ = True`), in the class DSL, generated stubs and LinkML YAML
+  (`ontolith_personal`, `ontolith_personal_key`).
+- In redaction mode a human `admin` can call `Ontology.erase_subject(entity_id, actor=...,
+  reason=...)`, or run `ontolith entity erase`. Values of `personal` properties become NULL and
+  their assertions are retracted; pending proposals that carry them are rejected as "erased" and
+  every affected proposal payload is blanked; affected contradictions are closed with no winner;
+  the entity's vectors are rebuilt out of the index; and the bytes are removed from the database
+  file (`secure_delete`, WAL checkpoint, `VACUUM`). If another process is reading the file the
+  cleanup can be incomplete: the result reports it and repeating the erasure finishes it.
+  Backups, exports, unmarked free text, principal ids and logs are not touched.
+- `ontolith redaction status` and `ontolith redaction enable`. The schema views of the CLI, REST,
+  GraphQL and MCP show which properties are `personal`; the provenance views of REST, GraphQL and
+  MCP show a `redacted` flag. MCP has no erase tool.
+- New public names: `ErasureMode`, `ErasureRecord`, `ErasureResult` (identity), `RedactionBackend`,
+  `RedactionPlan`, `ProposalRedaction`, `ErasureCounts` (store) and `Assertion.redacted`. A redacted
+  assertion reads with an empty `value`.
+- SQLite supports the mode. The DuckDB backend does not, because it cannot remove old bytes from
+  its file in place; `erasure="redaction"` on it raises.
+
+**Upgrade note:** a file moved to redaction mode must not be opened with a release older than 1.2.0.
+There is no `format_version` change, so an older release opens it without complaint and treats it
+as `strict`.
 
 ### Changed
 - Extending an open contradiction no longer rewrites the status of members that are already
@@ -1880,6 +1891,7 @@ new HIGH regressions, closed in a sixth PR.
 - Contribution guidelines and community health files
 - import-linter configuration for dependency rule enforcement
 
-[Unreleased]: https://github.com/ontolith/ontolith/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ontolith/ontolith/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/ontolith/ontolith/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ontolith/ontolith/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ontolith/ontolith/releases/tag/v1.0.0
