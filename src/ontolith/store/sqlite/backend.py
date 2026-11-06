@@ -420,6 +420,7 @@ class SQLiteBackend:
                     SELECT RAISE(ABORT, '{table} is append-only: DELETE is not permitted');
                 END
             """)
+            # `table` iterates the two fixed names above, never caller input.
             cursor.execute(f"""
                 CREATE TRIGGER IF NOT EXISTS trg_{table}_no_replace
                 BEFORE INSERT ON {table}
@@ -427,7 +428,7 @@ class SQLiteBackend:
                 BEGIN
                     SELECT RAISE(ABORT, '{table} is append-only: REPLACE is not permitted');
                 END
-            """)
+            """)  # nosec B608
         cursor.execute("""
             CREATE TRIGGER IF NOT EXISTS trg_kb_setting_erasure_mode_needs_record
             BEFORE INSERT ON kb_setting
@@ -1179,7 +1180,7 @@ class SQLiteBackend:
     def _is_empty(self) -> bool:
         """True when no principal, entity, assertion, proposal or schema exists."""
         return all(
-            self.conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is None  # noqa: S608
+            self.conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is None  # noqa: S608  # nosec B608
             for table in ("principal", "entity", "assertion", "proposal", "schema_version")
         )
 
