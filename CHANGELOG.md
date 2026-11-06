@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database file (`secure_delete`, WAL checkpoint, `VACUUM`). Adds `ErasureResult`,
   `RedactionPlan`, `ProposalRedaction`, `ErasureCounts` and `Assertion.redacted`. A redacted
   assertion reads with an empty `value`. Strict mode is unchanged and still refuses any erasure.
+- Opt-in redaction mode, part 3 (ADR-0056). `ontolith redaction status|enable` and
+  `ontolith entity erase`; the schema views of the CLI, REST, GraphQL and MCP show which properties
+  are `personal`, and the provenance views show a `redacted` flag. Both are additive. The DuckDB
+  backend does not support redaction mode: it cannot remove old bytes from its file in place.
+  **Upgrade note:** a file moved to redaction mode must not be opened with a release older than
+  the one that introduces the mode. There is no `format_version` change, so an older release opens
+  it without complaint and treats it as `strict`.
 
 ### Changed
 - Extending an open contradiction no longer rewrites the status of members that are already

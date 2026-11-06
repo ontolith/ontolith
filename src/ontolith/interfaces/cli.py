@@ -39,6 +39,9 @@ db_app = typer.Typer(
     help="Inspect and apply on-disk storage-format migrations (SPEC §15, ADR-0052).",
     no_args_is_help=True,
 )
+redaction_app = typer.Typer(
+    help="Opt-in erasure of personal data (ADR-0056).", no_args_is_help=True
+)
 app.add_typer(principal_app, name="principal")
 app.add_typer(entity_app, name="entity")
 app.add_typer(proposal_app, name="proposal")
@@ -47,6 +50,7 @@ app.add_typer(namespace_app, name="namespace")
 app.add_typer(schema_app, name="schema")
 app.add_typer(admin_event_app, name="admin-event")
 app.add_typer(db_app, name="db")
+app.add_typer(redaction_app, name="redaction")
 
 # Module-level DB path, set by the root callback before any command runs.
 _db_path: Path = Path("ontolith.db")
@@ -962,6 +966,7 @@ def schema_show(
                     f"  cardinality={prop_def.cardinality}"
                     f"  temporality={prop_def.temporality}"
                     f"  required={prop_def.required}"
+                    f"{'  personal=True' if prop_def.personal else ''}"
                 )
             for rel_name, rel_def in concept_def.relations.items():
                 typer.echo(
@@ -1130,6 +1135,95 @@ def admin_events_list(
         raise typer.Exit(1) from None
     finally:
         kb.close()
+
+
+# ─── redaction ────────────────────────────────────────────────────────────────
+
+
+@redaction_app.command("status")
+def redaction_status() -> None:
+    """Show the knowledge base's erasure mode and its erasure records."""
+    kb = _kb()
+    try:
+        typer.echo(f"erasure mode: {kb.erasure_mode}")
+        records = getattr(kb.backend, "erasure_records", None)
+        for r in records() if records is not None else []:
+            subject = f"  subject={r.subject}" if r.subject else ""
+            typer.echo(f"{r.at.isoformat()}  {r.kind}  by={r.actor}{subject}")
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        kb.close()
+
+
+@redaction_app.command("enable")
+def redaction_enable(
+    author: Annotated[
+        str, typer.Option("--author", help="Human admin principal enabling redaction.")
+    ],
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask for confirmation.")] = False,
+) -> None:
+    """Move this knowledge base to redaction mode. This cannot be undone.
+
+    After the first erasure the strict guarantee (nothing is ever altered) no
+    longer holds for this knowledge base. Do not open the file with an older
+    release afterwards: it would ignore the mode.
+    """
+    if not yes:
+        typer.confirm("Enable redaction mode? This is one-way.", abort=True)
+    kb = _kb()
+    try:
+        kb.enable_redaction(author)
+        typer.echo("Redaction mode enabled.")
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        kb.close()
+
+
+@entity_app.command("erase")
+def entity_erase(
+    entity_id: Annotated[str, typer.Argument(help="Entity whose personal data to erase.")],
+    author: Annotated[
+        str, typer.Option("--author", help="Human admin principal performing the erasure.")
+    ],
+    reason: Annotated[
+        str, typer.Option("--reason", help="Request reference (never personal data).")
+    ],
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask for confirmation.")] = False,
+) -> None:
+    """Erase an entity's personal data (redaction mode only, ADR-0056).
+
+    Values of properties the schema marks personal are removed for good, and
+    so are the bytes in the database file. Backups and exports are not
+    touched. If another process is reading the file the command reports that
+    the cleanup is incomplete; run it again once readers have finished.
+    """
+    if not yes:
+        typer.confirm(f"Permanently erase personal data of {entity_id}?", abort=True)
+    kb = _kb()
+    try:
+        result = kb.erase_subject(entity_id, actor=author, reason=reason)
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        kb.close()
+    typer.echo(
+        f"Erased {result.entity_id}  assertions={result.assertions_redacted}"
+        f"  proposals_rejected={result.proposals_rejected}"
+        f"  proposals_redacted={result.proposals_redacted}"
+        f"  contradictions_closed={result.contradictions_closed}"
+        f"  record={result.erasure_id}"
+    )
+    # A re-indexing failure exits 0: the erasure is complete and `reindex` fixes the search.
+    if result.reindex_error:
+        typer.echo(f"Warning: re-indexing failed: {result.reindex_error}", err=True)
+    if result.compaction_error:
+        typer.echo(f"Warning: {result.compaction_error}", err=True)
+        raise typer.Exit(1)
 
 
 __all__ = ["app"]

@@ -186,6 +186,7 @@ class PropertyType:
     cardinality: str
     temporality: str
     required: bool
+    personal: bool = False
 
 
 @strawberry.type
@@ -307,6 +308,7 @@ class ProvenanceType:
     supersedes: str | None
     superseded_ids: list[str]
     review_events: list[ReviewEventType]
+    redacted: bool = False
 
 
 @strawberry.type
@@ -582,6 +584,7 @@ def _build_schema(kb: Ontology, namespace: str) -> SchemaType:
                     cardinality=prop_def.cardinality,
                     temporality=prop_def.temporality,
                     required=prop_def.required,
+                    personal=prop_def.personal,
                 )
                 for prop_name, prop_def in concept_def.properties.items()
             ],
@@ -675,6 +678,7 @@ def _build_provenance(kb: Ontology, assertion_id: str) -> ProvenanceType:
         value=a.value,
         value_type=a.value_type,
         status=a.status,
+        redacted=a.redacted,
         author=a.author,
         confidence=a.confidence,
         source=a.source,

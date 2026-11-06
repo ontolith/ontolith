@@ -2653,3 +2653,129 @@ class TestAdminEventsList:
         )
         assert result.exit_code == 1
         assert "lacks admin capability" in result.output
+
+
+class TestRedactionCommands:
+    def _kb_path(self, tmp_path: Path) -> Path:
+        from ontolith.schema import Concept, Property, Text, compile_schema
+
+        class Person(Concept):
+            name: Text = Property(personal=True)  # type: ignore[assignment]
+
+        path = tmp_path / "kb.db"
+        kb = Ontology.connect(path, erasure="redaction")
+        kb.create_principal("admin@example.com", kind="human", default_capability="admin")
+        kb.apply_schema(compile_schema("default", 1, Person), "admin@example.com")
+        eid = kb.create_entity("Person", "admin@example.com").id
+        kb.assert_literal(eid, "Person.name", "Ada Lovelace", "Text", "admin@example.com")
+        kb.close()
+        self.eid = eid
+        return path
+
+    def test_status_erase_and_schema_flag(self, tmp_path: Path) -> None:
+        path = self._kb_path(tmp_path)
+        out = runner.invoke(app, ["--db", str(path), "redaction", "status"])
+        assert out.exit_code == 0 and "erasure mode: redaction" in out.output
+        result = runner.invoke(
+            app,
+            [
+                "--db", str(path), "entity", "erase", self.eid,
+                "--author", "admin@example.com", "--reason", "REQ-1", "--yes",
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        assert "assertions=1" in result.output
+        assert b"Ada Lovelace" not in path.read_bytes()
+        shown = runner.invoke(app, ["--db", str(path), "schema", "show"])
+        assert "personal=True" in shown.output
+
+    def test_erase_asks_for_confirmation(self, tmp_path: Path) -> None:
+        path = self._kb_path(tmp_path)
+        result = runner.invoke(
+            app,
+            [
+                "--db", str(path), "entity", "erase", self.eid,
+                "--author", "admin@example.com", "--reason", "r",
+            ],
+            input="n\n",
+        )  # fmt: skip
+        assert result.exit_code != 0 and "Aborted" in result.output
+        assert b"Ada Lovelace" in path.read_bytes()
+
+    def test_non_admin_and_ai_authors_are_refused(self, tmp_path: Path) -> None:
+        path = self._kb_path(tmp_path)
+        kb = Ontology.connect(path)
+        kb.create_principal("w@example.com", kind="human", default_capability="write")
+        kb.create_principal(
+            "bot", kind="service", default_capability="admin", owner="admin@example.com"
+        )
+        kb.close()
+        for author in ("w@example.com", "bot"):
+            erase = runner.invoke(
+                app,
+                ["--db", str(path), "entity", "erase", self.eid, "--author", author,
+                 "--reason", "r", "--yes"],
+            )  # fmt: skip
+            assert erase.exit_code == 1 and "Error" in erase.output
+        assert b"Ada Lovelace" in path.read_bytes()
+
+    def test_enable_prompt_can_be_declined_and_strict_status_is_empty(
+        self, seeded_db: tuple[Path, str, str]
+    ) -> None:
+        path, _, _ = seeded_db
+        kb = Ontology.connect(path)
+        kb.create_principal("root@example.com", kind="human", default_capability="admin")
+        kb.close()
+        declined = runner.invoke(
+            app, ["--db", str(path), "redaction", "enable", "--author", "root@example.com"],
+            input="n\n",
+        )  # fmt: skip
+        assert declined.exit_code != 0 and "Aborted" in declined.output
+        status = runner.invoke(app, ["--db", str(path), "redaction", "status"])
+        assert status.output.strip() == "erasure mode: strict"
+
+    def test_a_blocked_cleanup_exits_1_and_a_rerun_finishes(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        path = self._kb_path(tmp_path)
+        reader = sqlite3.connect(path, isolation_level=None)
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM assertion").fetchone()
+        kb = Ontology.connect(path)
+        kb.assert_literal(self.eid, "Person.name", "Ada Two", "Text", "admin@example.com")
+        kb.close()
+        args = ["--db", str(path), "entity", "erase", self.eid, "--author",
+                "admin@example.com", "--reason", "r", "--yes"]  # fmt: skip
+        blocked = runner.invoke(app, args)
+        assert blocked.exit_code == 1 and "Warning" in blocked.output
+        assert "Ada Lovelace" not in blocked.output
+        reader.execute("COMMIT")
+        reader.close()
+        assert runner.invoke(app, args).exit_code == 0
+        assert b"Ada Lovelace" not in path.read_bytes()
+
+    def test_strict_kb_refuses(self, seeded_db: tuple[Path, str, str]) -> None:
+        path, _, eid = seeded_db
+        kb = Ontology.connect(path)
+        kb.create_principal("root@example.com", kind="human", default_capability="admin")
+        kb.close()
+        result = runner.invoke(
+            app,
+            [
+                "--db", str(path), "entity", "erase", eid,
+                "--author", "root@example.com", "--reason", "r", "--yes",
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 1 and "strict" in result.output
+
+    def test_enable_is_recorded(self, seeded_db: tuple[Path, str, str]) -> None:
+        path, _, _ = seeded_db
+        kb = Ontology.connect(path)
+        kb.create_principal("root@example.com", kind="human", default_capability="admin")
+        kb.close()
+        result = runner.invoke(
+            app, ["--db", str(path), "redaction", "enable", "--author", "root@example.com", "--yes"]
+        )
+        assert result.exit_code == 0
+        status = runner.invoke(app, ["--db", str(path), "redaction", "status"])
+        assert "erasure mode: redaction" in status.output and "enabled" in status.output

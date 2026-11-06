@@ -182,6 +182,31 @@ from default query results — you have to ask for them explicitly
 `review`-or-above, non-AI principal resolves a contradiction explicitly with
 `resolve_contradiction()`; nothing is ever auto-resolved.
 
+## Erasing personal data (opt-in)
+
+By default a knowledge base is `strict`: nothing is ever altered or removed.
+Where the law requires erasing a person's data, a knowledge base can instead
+be created in `redaction` mode (`Ontology.connect(path, erasure="redaction")`),
+or an existing one can be moved over once with `enable_redaction`. The move is
+one-way and recorded. Do not open such a file with a release older than the one that
+introduced the mode: it would not know about it and would treat the file as strict.
+
+A schema marks the properties whose values identify a person
+(`Property(personal=True)`) and, optionally, a concept's natural key
+(`__personal_key__ = True`). A human `admin` can then call
+`Ontology.erase_subject(entity_id, actor=..., reason=...)`, or run
+`ontolith entity erase`. The marked values become NULL, their assertions are
+retracted, pending proposals that carry them are rejected (decided ones have the values blanked), affected
+contradictions are closed with no winner, and the bytes are removed from the
+database file (if another process is reading the file the cleanup can be incomplete; you
+are told, and running the erasure again finishes it). The entity, its id, its non-personal facts and an audit record
+of the erasure stay.
+
+What it does **not** reach: backups and exports you made earlier, free text
+the schema did not mark, principal ids, logs. The SQLite backend supports the
+mode; the DuckDB backend does not, because it cannot remove old bytes from its
+file in place.
+
 ## Bitemporality
 
 Every assertion carries **two** independent time dimensions:
