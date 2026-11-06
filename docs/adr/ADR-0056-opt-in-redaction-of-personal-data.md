@@ -1,6 +1,6 @@
 # ADR-0056: Opt-In Redaction of Personal Data
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-11-03
 **Deciders**: Ontolith Core Team
 **Related**: SPEC §3 and §7.1-7.2 (assertions are append-only; "never in-place edits of the value"), SPEC §5.3 (the `metadata` blob round-trips), SPEC §15 (versioning, time-travel), SPEC §17 (the audit trail MUST NOT be mutable), ADR-0003 (agent identity), ADR-0019 (SemVer policy), ADR-0031 (a retracted member cannot win a contradiction), ADR-0052 (storage-format migrations), ADR-0053 (resolution by winning value), KI-066 (store-level audit immutability)
@@ -117,3 +117,19 @@ SPEC §3, §7.2 and §17 gain a note that the append-only guarantee is unconditi
 - **A reversible mode switch.** Rejected: after an erasure, a return to `strict` would restore the claim without restoring the data.
 - **A `format_version` bump and a new method on `StorageBackend`.** Rejected: the bump forces `ontolith db migrate` on every user and, with the port change, makes this a major release under ADR-0019, for no benefit that the stored mode row does not already give.
 - **Making `proposal_event` updatable during erasure.** Rejected: it weakens a store-level guarantee for a column that does not hold the subject's values, and a gate that any raw connection can open does not protect the guarantee.
+
+## Update (2026-11-05): implementation, part 1
+
+Landed: the `personal` and `personal_key` schema fields (IR, class DSL, generated stubs, LinkML YAML annotations `ontolith_personal` and `ontolith_personal_key`); the `kb_setting` and `erasure_record` tables with the three append-only triggers each plus the one-way trigger on `erasure_mode`; the optional `RedactionBackend` protocol (SQLite implements it, DuckDB does not yet); `Ontology(erasure=...)`, `Ontology.connect(erasure=...)`, `Ontology.erasure_mode` and `Ontology.enable_redaction`. No `format_version` change.
+
+Decisions made while building it:
+
+- **`strict` is the absence of a row.** The store refuses any `erasure_mode` row other than `redaction`, so there is no `strict` row to maintain and nothing to flip back.
+- **"New knowledge base" means no principals.** `connect(erasure="redaction")` takes effect only on a knowledge base with no principals; any other strict knowledge base must use `enable_redaction`. The record's actor is `kb-setup` when the mode is chosen at creation.
+- **Redaction needs the optional protocol.** Asking for it on a backend without `RedactionBackend` raises `ValidationError`.
+- **"New" is checked in the same transaction as the write.** `enable_redaction(record, require_empty=True)` on the backend refuses unless there are no principals, entities, assertions, proposals or schemas, so nothing can be written between the check and the mode change. The rule is wider than "no principals" because data can be written straight to a backend.
+- **The new tables are `WITHOUT ROWID`.** A `REPLACE` that collides on `rowid` instead of `id` would delete an audit row without firing the delete trigger (the `recursive_triggers` pragma is per-connection). The older audit tables have this hole; it is recorded as KI-117.
+- **A `redaction` row needs its record.** The store refuses an `erasure_mode = redaction` row unless an `enabled` `erasure_record` with the same id exists, so no raw insert can turn the mode on without leaving an audit record.
+- **A schema mark that cannot be read is an error.** The LinkML `ontolith_personal` annotation accepts only `true` or `false`; anything else, or the annotation on a relation, raises `SchemaError`, because a typo that reads as "not personal" is the unsafe direction.
+
+Still to come: `erase_subject`, physical removal, proposal and contradiction handling, and the read paths for redacted rows (part 2); the DuckDB decision, CLI command and SPEC notes (part 3).

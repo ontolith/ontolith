@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Opt-in redaction mode, part 1 (ADR-0056). A knowledge base is `strict` (the default, unchanged)
+  or `redaction`. `Ontology.connect(path, erasure="redaction")` creates a new knowledge base in
+  redaction mode, `Ontology.erasure_mode` reads the stored mode, and `Ontology.enable_redaction`
+  moves an existing one over (a human `admin`, one-way, recorded). Schemas can mark a property
+  `personal` (`Property(personal=True)`) and a concept's natural key `personal_key`, in the class
+  DSL, generated stubs and LinkML YAML. Nothing is erased yet: the erasure operation follows in a
+  later release. Adds the `kb_setting` and `erasure_record` tables (append-only, created on open;
+  no `format_version` change and no migration) and an optional `RedactionBackend` protocol.
+  SQLite only; DuckDB stays strict.
+
 ### Changed
 - Extending an open contradiction no longer rewrites the status of members that are already
   `flagged`, which lowers the cost of a write that lands in a large contradiction (KI-100, part b).
