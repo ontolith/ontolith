@@ -87,6 +87,15 @@ class Assertion(BaseModel):
 
         return values
 
+    @property
+    def redacted(self) -> bool:
+        """Whether this assertion's personal value was erased (ADR-0056).
+
+        A redacted assertion has an empty `value` and no `source` or
+        `rationale`. It is retracted unless it was already superseded.
+        """
+        return "redacted" in self.metadata and not self.value
+
     model_config = ConfigDict(
         frozen=True,  # Immutable by default
         # Only status, valid_to, supersedes can be "mutated" via copy(update={...})

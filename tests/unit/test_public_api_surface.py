@@ -109,6 +109,7 @@ _EXPECTED: dict[str, frozenset[str]] = {
             "AuthProvider",
             "ErasureMode",
             "ErasureRecord",
+            "ErasureResult",
             "Principal",
             "PrincipalCredential",
             "TokenAuthProvider",
@@ -117,7 +118,15 @@ _EXPECTED: dict[str, frozenset[str]] = {
         }
     ),
     "ontolith.store": frozenset(
-        {"StorageBackend", "RedactionBackend", "VECTOR_SCOPES", "DEFAULT_NAMESPACE"}
+        {
+            "StorageBackend",
+            "RedactionBackend",
+            "RedactionPlan",
+            "ProposalRedaction",
+            "ErasureCounts",
+            "VECTOR_SCOPES",
+            "DEFAULT_NAMESPACE",
+        }
     ),
     "ontolith.store.migrations": frozenset({"MigrationReport", "MigrationStep"}),
     "ontolith.store.sqlite": frozenset({"SQLiteBackend", "migrations"}),

@@ -27,6 +27,7 @@ from ontolith.govern.proposal import Proposal, ProposalEvent
 from ontolith.identity import AdminEvent, ErasureMode, ErasureRecord, Principal, PrincipalCredential
 from ontolith.schema import SchemaIR
 from ontolith.store.base import DEFAULT_NAMESPACE, VECTOR_SCOPES
+from ontolith.store.redaction import ErasureCounts, RedactionPlan
 from ontolith.store.sqlite import migrations
 
 _P = ParamSpec("_P")
@@ -178,6 +179,9 @@ class SQLiteBackend:
         self._lock = threading.RLock()
         self._clock: Clock = clock or SystemClock()
         self._create_schema()
+        if self.erasure_mode() == "redaction":
+            # Freed pages are overwritten, not just unlinked (ADR-0056 §4).
+            self.conn.execute("PRAGMA secure_delete = ON")
 
     def _create_schema(self) -> None:
         """Create database schema if not exists."""
@@ -1174,6 +1178,7 @@ class SQLiteBackend:
                     "VALUES (?, 'erasure_mode', 'redaction', ?, ?)",
                     (record.id, record.at.isoformat(), record.actor),
                 )
+            self.conn.execute("PRAGMA secure_delete = ON")
         except sqlite3.Error as e:
             raise StorageError(f"Failed to enable redaction: {e}") from e
 
@@ -1198,6 +1203,158 @@ class SQLiteBackend:
                 record.detail,
             ),
         )
+
+    @_synchronized
+    def apply_redaction(self, plan: RedactionPlan) -> ErasureCounts:
+        """Apply an erasure plan inside the caller's open transaction (ADR-0056 §3).
+
+        The caller opens the transaction, builds the plan from reads made
+        inside it, and commits, so nothing can change between planning and
+        applying. Call `compact()` after the commit to remove the bytes.
+        """
+        if self.erasure_mode() != "redaction":
+            raise ValidationError(
+                "This knowledge base is in strict mode; enable redaction before erasing"
+            )
+        if not self._in_transaction:
+            raise ValidationError("apply_redaction must run inside an open transaction")
+        record = plan.record
+        marker = json.dumps(
+            {
+                "redacted": {
+                    "erasure_id": record.id,
+                    "by": record.actor,
+                    "at": record.at.isoformat(),
+                }
+            }
+        )
+        at = record.at.isoformat()
+        rejected = 0
+        try:
+            cur = self.conn.cursor()
+            for assertion_id in plan.assertion_ids:
+                cur.execute(
+                    "UPDATE assertion SET value_lit = NULL, source = NULL, "
+                    "rationale = NULL, metadata = ? "
+                    "WHERE id = ? AND subject = ? AND value_kind = 'literal'",
+                    (marker, assertion_id, plan.entity_id),
+                )
+                if cur.rowcount != 1:
+                    raise StorageError(
+                        f"Assertion {assertion_id} is not a literal of {plan.entity_id}"
+                    )
+            for event in plan.retractions:
+                cur.execute(
+                    "UPDATE assertion SET status = 'retracted', "
+                    "valid_to = COALESCE(valid_to, ?) WHERE id = ?",
+                    (event.at.isoformat(), event.assertion_id),
+                )
+                self.put_assertion_event(event)
+            if plan.redact_natural_key:
+                cur.execute("UPDATE entity SET natural_key = NULL WHERE id = ?", (plan.entity_id,))
+            for item in plan.proposals:
+                cur.execute(
+                    "UPDATE proposal SET payload = ? WHERE id = ?",
+                    (json.dumps(item.payload), item.proposal_id),
+                )
+                if item.reject_event is not None:
+                    cur.execute(
+                        "UPDATE proposal SET state = 'rejected', decided_at = ?, "
+                        "policy_reason = 'erased' WHERE id = ?",
+                        (item.reject_event.at.isoformat(), item.proposal_id),
+                    )
+                    self.put_proposal_event(item.reject_event)
+                    rejected += 1
+            contradiction_marker = json.dumps({"erased": json.loads(marker)["redacted"]})
+            closed = 0
+            for contradiction_id in plan.contradiction_ids:
+                was_open = cur.execute(
+                    "SELECT 1 FROM contradiction WHERE id = ? AND state = 'open'",
+                    (contradiction_id,),
+                ).fetchone()
+                closed += 1 if was_open else 0
+                cur.execute(
+                    "UPDATE contradiction SET "
+                    "resolved_by = CASE WHEN state = 'open' THEN ? ELSE resolved_by END, "
+                    "resolved_at = CASE WHEN state = 'open' THEN ? ELSE resolved_at END, "
+                    "state = 'resolved', metadata = ? WHERE id = ?",
+                    (record.actor, at, contradiction_marker, contradiction_id),
+                )
+            if plan.assertion_ids:
+                self._remove_vectors({plan.entity_id, *plan.assertion_ids})
+            counts = ErasureCounts(
+                assertions=len(plan.assertion_ids),
+                proposals_rejected=rejected,
+                proposals_redacted=len(plan.proposals),
+                contradictions_closed=closed,
+            )
+            self._insert_erasure_record(
+                record.model_copy(update={"detail": counts.model_dump_json()})
+            )
+        except sqlite3.Error as e:
+            raise StorageError(f"Failed to apply the erasure of {plan.entity_id}: {e}") from e
+        return counts
+
+    def _remove_vectors(self, ids: set[str]) -> None:
+        """Drop `ids` from every vector scope by rebuilding the scope.
+
+        vec0 keeps deleted vectors in its chunk tables, and a re-embedded
+        text leaves its old embedding behind, so deleting by id is not enough:
+        the virtual table is recreated from the survivors (ADR-0056 §4).
+        """
+        cur = self.conn.cursor()
+        for scope_row in cur.execute("SELECT scope, dim FROM vector_scope").fetchall():
+            scope, dim = scope_row["scope"], scope_row["dim"]
+            self._validate_scope(scope)
+            table = f"vector_{scope}"
+            survivors: list[tuple[str, bytes]] = []
+            for m in cur.execute(
+                "SELECT id, vec_rowid FROM vector_id_map WHERE scope = ? ORDER BY vec_rowid",
+                (scope,),
+            ).fetchall():
+                if m["id"] in ids:
+                    continue
+                blob = cur.execute(
+                    f"SELECT embedding FROM {table} WHERE rowid = ?",  # nosec B608
+                    (m["vec_rowid"],),
+                ).fetchone()
+                if blob is not None:
+                    survivors.append((m["id"], blob[0]))
+            cur.execute(f"DROP TABLE {table}")  # nosec B608
+            cur.execute(f"CREATE VIRTUAL TABLE {table} USING vec0(embedding FLOAT[{int(dim)}])")  # nosec B608
+            cur.execute("DELETE FROM vector_id_map WHERE scope = ?", (scope,))
+            for vec_id, embedding in survivors:
+                cur.execute(f"INSERT INTO {table}(embedding) VALUES (?)", (embedding,))  # nosec B608
+                cur.execute(
+                    "INSERT INTO vector_id_map (scope, id, vec_rowid) VALUES (?, ?, ?)",
+                    (scope, vec_id, cur.lastrowid),
+                )
+
+    @_synchronized
+    def compact(self) -> str | None:
+        """Remove freed bytes from the database file and its WAL (ADR-0056 §4).
+
+        Returns None when the file is clean, or a description of what is left:
+        a WAL checkpoint cannot finish while another connection holds a read
+        snapshot, and `VACUUM` needs free disk space and no open transaction.
+        Safe to call again later; an erasure with nothing to change still
+        compacts.
+        """
+        if self._in_transaction:
+            raise ValidationError("compact cannot run inside an open transaction")
+        try:
+            self.conn.execute("PRAGMA secure_delete = ON")
+            self.conn.execute("VACUUM")
+            busy, log, done = self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        except sqlite3.Error as e:
+            return f"compaction failed: {e}"
+        if busy or log != done:
+            return (
+                "the write-ahead log could not be fully checkpointed because another "
+                "connection is reading; erased bytes may remain in the -wal file until "
+                "readers finish and erase_subject (or compact) is run again"
+            )
+        return None
 
     @_synchronized
     def erasure_records(self) -> list[ErasureRecord]:
@@ -1534,6 +1691,11 @@ class SQLiteBackend:
 
         # Reconstruct unified value from value_lit/value_ref
         value = row["value_lit"] if row["value_kind"] == "literal" else row["value_ref"]
+        if value is None:
+            # A redacted value (ADR-0056) is NULL in storage; the model keeps
+            # `value: str` and reads it as empty. `Assertion.redacted` tells
+            # the two apart.
+            value = ""
 
         return Assertion(
             id=row["id"],
