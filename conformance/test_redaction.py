@@ -16,7 +16,7 @@ from ontolith.schema import Concept, Property, Text, compile_schema
 from ontolith.store.redaction import RedactionBackend
 
 ADMIN = "admin@example.com"
-SECRET = "Zyxwvut-Quuxplugh-1971"
+SECRET = "Ada Quuxplugh Lovelace"
 
 
 class Person(Concept):

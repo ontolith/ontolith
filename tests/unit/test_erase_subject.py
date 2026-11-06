@@ -16,8 +16,8 @@ from ontolith.schema import Concept, Integer, Property, Text, compile_schema
 
 T0 = datetime(2025, 1, 1, tzinfo=UTC)
 ADMIN = "admin@example.com"
-SECRET = "Zyxwvut-Quuxplugh-1971"
-SECRET_KEY = "key-Qwertyuiop-4242"
+SECRET = "Ada Quuxplugh Lovelace"
+SECRET_KEY = "Ada Lovelace natural key"
 
 
 class Person(Concept):
