@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   later release. Adds the `kb_setting` and `erasure_record` tables (append-only, created on open;
   no `format_version` change and no migration) and an optional `RedactionBackend` protocol.
   SQLite only; DuckDB stays strict.
+- Opt-in redaction mode, part 2 (ADR-0056). In redaction mode a human `admin` can call
+  `Ontology.erase_subject(entity_id, actor=..., reason=...)`. Values of `personal` properties
+  become NULL and their assertions are retracted; pending proposals that carry them are rejected
+  as "erased" and every proposal payload is blanked; affected contradictions are closed with no
+  winner; the entity's vectors are rebuilt out of the index; and the bytes are removed from the
+  database file (`secure_delete`, WAL checkpoint, `VACUUM`). Adds `ErasureResult`,
+  `RedactionPlan`, `ProposalRedaction`, `ErasureCounts` and `Assertion.redacted`. A redacted
+  assertion reads with an empty `value`. Strict mode is unchanged and still refuses any erasure.
 
 ### Changed
 - Extending an open contradiction no longer rewrites the status of members that are already

@@ -41,4 +41,35 @@ class ErasureRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-__all__ = ["ErasureMode", "ErasureRecord"]
+class ErasureResult(BaseModel):
+    """What one `Ontology.erase_subject` call did.
+
+    Attributes:
+        erasure_id: ID of the `erased` ErasureRecord
+        entity_id: The erased entity
+        assertions_redacted: Assertions whose personal value was removed
+        proposals_rejected: Pending proposals rejected as "erased"
+        proposals_redacted: Proposals whose payload was blanked (includes the
+            rejected ones)
+        contradictions_closed: Open contradictions closed with no winner
+        compaction_error: Set if the old bytes could not all be removed from
+            the file (for example another connection is reading). The data
+            change is committed; call `erase_subject` again once readers have
+            finished, which compacts again.
+        reindex_error: Set if re-embedding the entity's remaining text failed
+            afterwards. The erasure itself is complete; run `reindex()` later.
+    """
+
+    erasure_id: str
+    entity_id: str
+    assertions_redacted: int
+    proposals_rejected: int
+    proposals_redacted: int
+    contradictions_closed: int
+    compaction_error: str | None = None
+    reindex_error: str | None = None
+
+    model_config = ConfigDict(frozen=True)
+
+
+__all__ = ["ErasureMode", "ErasureRecord", "ErasureResult"]

@@ -132,4 +132,23 @@ Decisions made while building it:
 - **A `redaction` row needs its record.** The store refuses an `erasure_mode = redaction` row unless an `enabled` `erasure_record` with the same id exists, so no raw insert can turn the mode on without leaving an audit record.
 - **A schema mark that cannot be read is an error.** The LinkML `ontolith_personal` annotation accepts only `true` or `false`; anything else, or the annotation on a relation, raises `SchemaError`, because a typo that reads as "not personal" is the unsafe direction.
 
-Still to come: `erase_subject`, physical removal, proposal and contradiction handling, and the read paths for redacted rows (part 2); the DuckDB decision, CLI command and SPEC notes (part 3).
+Still to come after part 2: the DuckDB decision, the CLI command and the SPEC notes (part 3).
+
+## Update (2026-11-06): implementation, part 2
+
+Landed: `Ontology.erase_subject(entity_id, *, actor, reason)` on SQLite, as `RedactionBackend.apply_redaction(plan)` and `compact()`. The domain builds a `RedactionPlan` (pure functions in `govern/erasure.py`) from reads made inside the same write transaction that applies it, so nothing can land between planning and applying; after the commit the backend runs `VACUUM` and a WAL checkpoint. It covers assertions, the natural key, proposals, contradictions, vectors and the `erased` record, and a conformance vector asserts that the erased bytes are absent from the database file and its WAL.
+
+Decisions made while building it:
+
+- **A redacted value reads as an empty string, not `None`.** The column is `NULL`, which typed filters (`CAST(NULL AS REAL)`) never match, but `Assertion.value` stays `str`: widening it would be a breaking annotation change under the 1.x API freeze. `Assertion.redacted` (true when the metadata carries the `redacted` marker) tells a redacted row from an empty value.
+- **Only literal assertions of the entity on personal predicates are redacted.** Rows already redacted are skipped, so a repeated erasure is a no-op that still writes its own record.
+- **The plan names every change.** The backend decides nothing: a plan row that does not match (an id that is not a literal of that entity) aborts the whole transaction.
+- **Closing a contradiction keeps the original resolver.** An already resolved contradiction on a personal predicate keeps its `resolved_by` and `resolved_at`; only its rationale history is replaced. An open one is closed by the erasing actor with no winner.
+- **Pending proposals are rejected as `erased`;** decided ones keep their state and have the values blanked. A batch proposal is matched through its recorded `created_entities` map.
+- **Vectors are rebuilt, not deleted.** Every scope's `vec0` table is recreated from the surviving vectors inside the transaction, and the entity is re-embedded from its remaining text afterwards. A failure there is reported on the result, not rolled back.
+- **Compaction is checked and reported.** A WAL checkpoint cannot finish while another connection holds a read snapshot, and `VACUUM` needs disk space. The result then carries `compaction_error`; the data change is already committed, and calling `erase_subject` again (which finds nothing more to change) compacts again. Erasure therefore wants a moment without long-lived readers on the file.
+- **A pending batch is rejected whole** if any of its operations carries this entity's personal value, including operations about other people; resubmitting the rest is the author's job.
+- **Left out, in addition to section "Out of scope":** a pending batch that would re-create the same person has no entity yet to match, and a custom `PolicyStrategy` reason stored as `policy_reason` is not blanked (the built-in reasons hold no values).
+- **`secure_delete` is on for every connection to a redaction-mode file,** set on open and when redaction is enabled.
+
+Not done here, and still open: showing the `personal` marks and the `redacted` flag in the REST, GraphQL, MCP and CLI views (they serialise the empty value and the metadata marker as they stand).

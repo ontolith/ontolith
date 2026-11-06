@@ -35,6 +35,12 @@ from ontolith.core.errors import (
 from ontolith.govern import AutoAccept, ThresholdPolicy
 from ontolith.govern.conflict import ConflictResult, Contradict, Supersede, route
 from ontolith.govern.contradiction import Contradiction, safe_rationale_history
+from ontolith.govern.erasure import (
+    is_pending,
+    personal_key_concepts,
+    personal_predicates,
+    redact_operations,
+)
 from ontolith.govern.operations import (
     MAX_BATCH_OPERATIONS,
     AssertLiteralOp,
@@ -50,6 +56,7 @@ from ontolith.identity import (
     AdminEvent,
     ErasureMode,
     ErasureRecord,
+    ErasureResult,
     Principal,
     PrincipalCredential,
     min_capability,
@@ -58,7 +65,7 @@ from ontolith.identity.admin_event import AdminAction
 from ontolith.query import QueryBuilder
 from ontolith.schema import SchemaIR
 from ontolith.store.base import DEFAULT_NAMESPACE, StorageBackend
-from ontolith.store.redaction import RedactionBackend
+from ontolith.store.redaction import ProposalRedaction, RedactionBackend, RedactionPlan
 
 if TYPE_CHECKING:
     from ontolith.plugins.ports import Validator
@@ -362,6 +369,165 @@ class Ontology:
         if self.erasure_mode == "redaction":
             return
         self._store_redaction(actor=actor)
+
+    def erase_subject(self, entity_id: str, *, actor: str, reason: str) -> ErasureResult:
+        """Erase the personal data of one entity (ADR-0056).
+
+        Only in `redaction` mode, and only for a human principal holding
+        `admin`: an AI or service principal, and any delegation, is refused.
+        Values of properties marked `personal` become NULL, their assertions
+        are retracted, proposals carrying them are rejected as "erased" and
+        blanked, affected contradictions are closed with no winner, the
+        entity's vectors are removed, and the bytes are removed from the
+        database file. The entity, its id and its non-personal assertions
+        stay. Runs outside any open transaction.
+
+        Args:
+            entity_id: The entity to erase
+            actor: Principal id of the human admin erasing it
+            reason: Request reference, recorded in the erasure record. Not
+                personal data.
+
+        Returns:
+            Counts of what changed, plus `compaction_error` / `reindex_error`
+            if the byte removal or the re-embedding could not finish. The data
+            change is committed either way; call this again to finish.
+
+        Raises:
+            AuthError: `actor` is not a known principal
+            CapabilityError: `actor` is not a human holding `admin`
+            ValidationError: strict mode, a blank reason, or the backend lacks
+                the capability
+            NotFoundError: `entity_id` is not an entity of this namespace
+            StorageError: the erasure could not be applied (nothing changed)
+        """
+        principal = self.require_admin(actor)
+        if principal.kind != "human":
+            raise CapabilityError(
+                f"Principal {actor!r} is a {principal.kind} principal; "
+                "only a human admin can erase personal data"
+            )
+        backend = self._require_redaction_capable_backend()
+        if self.erasure_mode != "redaction":
+            raise ValidationError(
+                "This knowledge base is in strict mode; enable redaction to erase personal data"
+            )
+        if not reason or not reason.strip():
+            raise ValidationError("An erasure needs a reason (a request reference)")
+        entity = self.backend.get_entity(entity_id)
+        if entity is None or entity.namespace != self.namespace:
+            raise NotFoundError(f"Entity not found: {entity_id!r}")
+
+        # Plan and apply in ONE transaction (BEGIN IMMEDIATE), so no accept,
+        # assertion or contradiction can land between reading and changing.
+        with self.backend.transaction():
+            plan = self._plan_erasure(entity, actor, reason.strip())
+            counts = backend.apply_redaction(plan)
+        compaction_error = backend.compact()
+
+        reindex_error: str | None = None
+        try:
+            text = self._entity_text(entity)
+            if text is not None:
+                self.backend.vector_upsert("entity", entity.id, self.embedder.embed([text])[0])
+        except Exception as exc:  # noqa: BLE001 - reported, never rolled back
+            reindex_error = f"{type(exc).__name__}: {exc}"
+        return ErasureResult(
+            erasure_id=plan.record.id,
+            entity_id=entity.id,
+            assertions_redacted=counts.assertions,
+            proposals_rejected=counts.proposals_rejected,
+            proposals_redacted=counts.proposals_redacted,
+            contradictions_closed=counts.contradictions_closed,
+            compaction_error=compaction_error,
+            reindex_error=reindex_error,
+        )
+
+    def _plan_erasure(self, entity: Entity, actor: str, reason: str) -> RedactionPlan:
+        """Work out what erasing `entity` changes (ADR-0056 §3)."""
+        schemas: list[SchemaIR] = []
+        latest = self.backend.get_schema(self.namespace)
+        if latest is not None:
+            for version in range(1, latest.version + 1):
+                schema = self.backend.get_schema(self.namespace, version)
+                if schema is not None:
+                    schemas.append(schema)
+        personal = personal_predicates(schemas)
+        redact_key = entity.concept in personal_key_concepts(schemas)
+        now = self.clock.now()
+
+        redacted = [
+            a
+            for a in self.backend.assertions(subject=entity.id, status=None)
+            if a.value_kind == "literal" and a.predicate in personal and not a.redacted
+        ]
+        retractions = tuple(
+            AssertionEvent(
+                id=self.id_provider.next(),
+                assertion_id=a.id,
+                actor=actor,
+                action="retracted",
+                at=now,
+            )
+            for a in redacted
+            if a.status in ("active", "flagged")
+        )
+
+        proposals: list[ProposalRedaction] = []
+        for proposal in self.backend.proposals():
+            if proposal.namespace != self.namespace:
+                continue
+            local_keys = frozenset(
+                key for key, eid in self.created_entities(proposal.id).items() if eid == entity.id
+            )
+            payload, touched = redact_operations(
+                proposal.payload,
+                entity_id=entity.id,
+                local_keys=local_keys,
+                personal=personal,
+                redact_key=redact_key,
+            )
+            if not touched:
+                continue
+            reject_event = (
+                ProposalEvent(
+                    id=self.id_provider.next(),
+                    proposal_id=proposal.id,
+                    actor=actor,
+                    type="reject",
+                    detail="erased",
+                    at=now,
+                )
+                if is_pending(proposal.state)
+                else None
+            )
+            proposals.append(
+                ProposalRedaction(
+                    proposal_id=proposal.id, payload=payload, reject_event=reject_event
+                )
+            )
+
+        contradictions = tuple(
+            c.id
+            for c in self.backend.contradictions()
+            if c.namespace == self.namespace and c.subject == entity.id and c.predicate in personal
+        )
+        return RedactionPlan(
+            record=ErasureRecord(
+                id=self.id_provider.next(),
+                kind="erased",
+                actor=actor,
+                at=now,
+                subject=entity.id,
+                reason=reason,
+            ),
+            entity_id=entity.id,
+            redact_natural_key=redact_key,
+            assertion_ids=tuple(a.id for a in redacted),
+            retractions=retractions,
+            proposals=tuple(proposals),
+            contradiction_ids=contradictions,
+        )
 
     @classmethod
     def connect(
