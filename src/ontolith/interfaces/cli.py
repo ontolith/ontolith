@@ -364,7 +364,10 @@ def list_assertions(
             return
         for a in results:
             conf = f"  confidence={a.confidence}" if a.confidence is not None else ""
-            typer.echo(f"{a.id}  {a.predicate}={a.value!r}  by={a.author}  status={a.status}{conf}")
+            redacted = "  redacted" if a.redacted else ""
+            typer.echo(
+                f"{a.id}  {a.predicate}={a.value!r}  by={a.author}  status={a.status}{conf}{redacted}"
+            )
     except Exception as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from None
@@ -959,7 +962,9 @@ def schema_show(
             return
         typer.echo(f"namespace={ir.namespace}  version={ir.version}")
         for concept_name, concept_def in ir.concepts.items():
-            typer.echo(f"\n{concept_name}")
+            typer.echo(
+                f"\n{concept_name}{'  personal_key=True' if concept_def.personal_key else ''}"
+            )
             for prop_name, prop_def in concept_def.properties.items():
                 typer.echo(
                     f"  {prop_name}: {prop_def.value_type}"

@@ -208,6 +208,7 @@ class ConceptType:
     name: str
     properties: list[PropertyType]
     relations: list[RelationType]
+    personal_key: bool = False
 
 
 @strawberry.type
@@ -599,6 +600,7 @@ def _build_schema(kb: Ontology, namespace: str) -> SchemaType:
                 )
                 for rel_name, rel_def in concept_def.relations.items()
             ],
+            personal_key=concept_def.personal_key,
         )
         for concept_name, concept_def in ir.concepts.items()
     ]

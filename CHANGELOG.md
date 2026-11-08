@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could name an existing `rowid` with a new id and drop the old row without the delete trigger firing.
   Each table now has a second guard on `rowid`, plus a trigger that refuses a non-positive `rowid`. A file made by an earlier release gets it the next time
   it is opened; there is no `format_version` change and no migration.
+- **Redaction mode: two display gaps.** The schema views (CLI `schema show`, REST `GET /schema`,
+  GraphQL `schema`, MCP `ontolith.schema`) now show which concepts declare a personal natural key
+  (`personal_key`, an additive field defaulting to `false`). The CLI `assertions` listing marks a
+  redacted assertion with `redacted`, so an erased value is no longer indistinguishable from an
+  empty one.
 
 ## [1.2.0] - 2026-11-06
 

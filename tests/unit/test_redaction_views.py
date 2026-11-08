@@ -21,10 +21,15 @@ class Person(Concept):
     city: Text | None = None
 
 
+class Customer(Concept):
+    __personal_key__ = True
+    plan: Text | None = None
+
+
 def _setup(tmp_path: Path) -> tuple[Ontology, str, str, str]:
     kb = Ontology.connect(tmp_path / "kb.db", erasure="redaction")
     kb.create_principal(ADMIN, kind="human", default_capability="admin")
-    kb.apply_schema(compile_schema("default", 1, Person), ADMIN)
+    kb.apply_schema(compile_schema("default", 1, Person, Customer), ADMIN)
     eid = kb.create_entity("Person", ADMIN).id
     aid = kb.assert_literal(eid, "Person.name", "Ada Lovelace", "Text", ADMIN).id
     kb.erase_subject(eid, actor=ADMIN, reason="r")
@@ -67,3 +72,36 @@ def test_mcp_shows_personal_and_redacted(tmp_path: Path) -> None:
     assert props == {"name": True, "city": False}
     prov = mcp._tool_manager.get_tool("ontolith.provenance").fn(token=token, assertion_id=aid)
     assert prov["redacted"] is True and prov["value"] == ""
+
+
+def test_rest_shows_which_concepts_have_a_personal_key(tmp_path: Path) -> None:
+    kb, token, _, _ = _setup(tmp_path)
+    client = TestClient(create_rest_app(kb, TokenAuthProvider(kb.backend)))
+    concepts = client.get("/schema", headers={"Authorization": f"Bearer {token}"}).json()[
+        "concepts"
+    ]
+    assert {c["name"]: c["personal_key"] for c in concepts} == {"Person": False, "Customer": True}
+
+
+def test_graphql_shows_which_concepts_have_a_personal_key(tmp_path: Path) -> None:
+    kb, token, _, _ = _setup(tmp_path)
+    client = TestClient(create_graphql_app(kb, TokenAuthProvider(kb.backend)))
+    body = client.post(
+        "/graphql",
+        json={"query": "{ schema { concepts { name personalKey } } }"},
+        headers={"Authorization": f"Bearer {token}"},
+    ).json()["data"]
+    assert {c["name"]: c["personalKey"] for c in body["schema"]["concepts"]} == {
+        "Person": False,
+        "Customer": True,
+    }
+
+
+def test_mcp_shows_which_concepts_have_a_personal_key(tmp_path: Path) -> None:
+    kb, token, _, _ = _setup(tmp_path)
+    mcp = create_mcp_server(kb, TokenAuthProvider(kb.backend))
+    schema = mcp._tool_manager.get_tool("ontolith.schema").fn(token=token)
+    assert {c["name"]: c["personal_key"] for c in schema["concepts"]} == {
+        "Person": False,
+        "Customer": True,
+    }
