@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A REPLACE that collided on `rowid` could remove a row from `assertion_event`, `proposal_event` or
+  `admin_event` (KI-117).** The append-only guard on a REPLACE only looked at `id`, so a raw connection
+  could name an existing `rowid` with a new id and drop the old row without the delete trigger firing.
+  Each table now has a second guard on `rowid`, plus a trigger that refuses a non-positive `rowid`. A file made by an earlier release gets it the next time
+  it is opened; there is no `format_version` change and no migration.
+
 ## [1.2.0] - 2026-11-06
 
 This minor release adds an opt-in redaction mode. Nothing changes for a knowledge base that does not

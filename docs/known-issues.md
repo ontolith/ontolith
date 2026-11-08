@@ -2477,10 +2477,10 @@ The same principal asserting `Item.name = "Bolt"` three times from the same sour
 
 ---
 
-## KI-117 — A REPLACE that collides on `rowid` bypasses the append-only triggers on the older audit tables
+## KI-117 — A REPLACE that collides on `rowid` bypasses the append-only triggers on the older audit tables ✓ RESOLVED (Backlog)
 
 **Severity:** Architecture gap — a raw-connection bypass of a store-level guarantee
-**Milestone target:** Backlog
+**Milestone target:** Backlog — resolved without a milestone change
 **SPEC reference:** SPEC §17 (the audit trail MUST NOT be mutable); KI-066
 
 ### Description
@@ -2489,7 +2489,7 @@ The same principal asserting `Item.name = "Bolt"` three times from the same sour
 
 ### Fix
 
-These tables already exist in deployed files, so `WITHOUT ROWID` cannot be applied in place. Add a guard to the REPLACE trigger on `rowid` as well (for example `WHEN EXISTS(SELECT 1 ... WHERE id = NEW.id OR rowid = NEW.rowid)`), created with `CREATE TRIGGER IF NOT EXISTS` under a new name so existing files pick it up on open, and add a test per table that a rowid-colliding REPLACE is refused. DuckDB has no triggers at all, so it is unaffected by this entry and covered by its own documented limitation.
+Each of the three tables has a second `BEFORE INSERT` guard, `trg_<table>_no_replace_rowid`, that aborts when the new row's `rowid` already exists, so a rowid-colliding REPLACE is refused whatever the connection's pragma state. SQLite shows an auto-assigned rowid as -1 inside that trigger, so the lookup is skipped for a non-positive value, and an `AFTER INSERT` trigger, `trg_<table>_rowid_positive`, refuses any row whose real rowid is not positive. Without it, one explicit `rowid = -1` insert would have made every later append look like a collision. The triggers are created with `CREATE TRIGGER IF NOT EXISTS` under a new name, so a file made by an earlier release picks them up the next time it is opened. No `format_version` change and no migration. Tests in `tests/unit/test_audit_rowid_replace.py` cover the refusal, ordinary appends, and an older file gaining the guard. DuckDB has no triggers at all, so it is unaffected by this entry and covered by its own documented limitation.
 
 ---
 
