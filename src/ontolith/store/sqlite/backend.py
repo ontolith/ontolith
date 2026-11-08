@@ -604,6 +604,23 @@ class SQLiteBackend:
             END
         """)
 
+        # KI-117: the REPLACE guards above only see a collision on `id`. A
+        # REPLACE that names an existing `rowid` with a new id removes the old
+        # row without firing the delete trigger (the pragma is per
+        # connection, so a raw connection has it off). These tables carry a
+        # rowid and already exist in deployed files, so they cannot become
+        # WITHOUT ROWID in place; a second guard on `rowid` under a new name
+        # is picked up by an existing file the next time it is opened.
+        for table in ("assertion_event", "proposal_event", "admin_event"):
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_no_replace_rowid
+                BEFORE INSERT ON {table}
+                WHEN EXISTS(SELECT 1 FROM {table} WHERE rowid = NEW.rowid)
+                BEGIN
+                    SELECT RAISE(ABORT, '{table} is append-only: REPLACE is not permitted');
+                END
+            """)  # nosec B608
+
         # Contradiction table (SPEC §10.3)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS contradiction (
