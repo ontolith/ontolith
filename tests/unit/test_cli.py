@@ -2660,6 +2660,7 @@ class TestRedactionCommands:
         from ontolith.schema import Concept, Property, Text, compile_schema
 
         class Person(Concept):
+            __personal_key__ = True
             name: Text = Property(personal=True)  # type: ignore[assignment]
 
         path = tmp_path / "kb.db"
@@ -2688,6 +2689,13 @@ class TestRedactionCommands:
         assert b"Ada Lovelace" not in path.read_bytes()
         shown = runner.invoke(app, ["--db", str(path), "schema", "show"])
         assert "personal=True" in shown.output
+        assert "Person  personal_key=True" in shown.output
+        listed = runner.invoke(
+            app, ["--db", str(path), "assertions", "--subject", self.eid, "--all"]
+        )
+        assert listed.exit_code == 0, listed.output
+        assert "Person.name=''" in listed.output
+        assert listed.output.strip().endswith("redacted")
 
     def test_erase_asks_for_confirmation(self, tmp_path: Path) -> None:
         path = self._kb_path(tmp_path)

@@ -356,6 +356,7 @@ def create_mcp_server(
                         }
                         for rel_name, rel_def in concept_def.relations.items()
                     ],
+                    "personal_key": concept_def.personal_key,
                 }
             )
         return {"namespace": namespace, "version": ir.version, "concepts": concepts}
