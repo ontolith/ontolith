@@ -2489,7 +2489,7 @@ The same principal asserting `Item.name = "Bolt"` three times from the same sour
 
 ### Fix
 
-Each of the three tables has a second `BEFORE INSERT` guard, `trg_<table>_no_replace_rowid`, that aborts when the new row's `rowid` already exists, so a rowid-colliding REPLACE is refused whatever the connection's pragma state. The triggers are created with `CREATE TRIGGER IF NOT EXISTS` under a new name, so a file made by an earlier release picks them up the next time it is opened. No `format_version` change and no migration. Tests in `tests/unit/test_audit_rowid_replace.py` cover the refusal, ordinary appends, and an older file gaining the guard. DuckDB has no triggers at all, so it is unaffected by this entry and covered by its own documented limitation.
+Each of the three tables has a second `BEFORE INSERT` guard, `trg_<table>_no_replace_rowid`, that aborts when the new row's `rowid` already exists, so a rowid-colliding REPLACE is refused whatever the connection's pragma state. SQLite shows an auto-assigned rowid as -1 inside that trigger, so the lookup is skipped for a non-positive value, and an `AFTER INSERT` trigger, `trg_<table>_rowid_positive`, refuses any row whose real rowid is not positive. Without it, one explicit `rowid = -1` insert would have made every later append look like a collision. The triggers are created with `CREATE TRIGGER IF NOT EXISTS` under a new name, so a file made by an earlier release picks them up the next time it is opened. No `format_version` change and no migration. Tests in `tests/unit/test_audit_rowid_replace.py` cover the refusal, ordinary appends, and an older file gaining the guard. DuckDB has no triggers at all, so it is unaffected by this entry and covered by its own documented limitation.
 
 ---
 

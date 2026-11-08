@@ -83,19 +83,71 @@ def test_ordinary_appends_still_work(tmp_path: Path, table: str) -> None:
 
 
 @pytest.mark.parametrize("table", sorted(_ROWS))
+@pytest.mark.parametrize("rowid", [-1, 0, -7])
+def test_a_non_positive_rowid_is_refused_and_does_not_break_later_appends(
+    tmp_path: Path, table: str, rowid: int
+) -> None:
+    """SQLite shows an auto-assigned rowid as -1 inside a BEFORE INSERT trigger, so
+    a stored row with that rowid would make every later append look like a
+    collision. Such a row must never be accepted."""
+    path = _kb(tmp_path)
+    raw = sqlite3.connect(path)
+    columns, values = _ROWS[table]
+    with pytest.raises(sqlite3.DatabaseError, match="rowid"):
+        raw.execute(
+            f"INSERT INTO {table} (rowid, {columns}) "  # noqa: S608  # nosec B608
+            f"VALUES (?, {', '.join('?' * len(values))})",
+            (rowid, *("neg" if v == "{id}" else v for v in values)),
+        )
+    raw.rollback()
+    for row_id in ("one", "two"):
+        _insert(raw, table, row_id)
+    raw.commit()
+    assert raw.execute(f"SELECT count(*) FROM {table}").fetchone() == (2,)  # noqa: S608  # nosec B608
+
+
+@pytest.mark.parametrize("table", sorted(_ROWS))
+def test_every_append_shape_still_works(tmp_path: Path, table: str) -> None:
+    raw = sqlite3.connect(_kb(tmp_path))
+    columns, values = _ROWS[table]
+    marks = ", ".join("?" * len(values))
+    raw.executemany(
+        f"INSERT INTO {table} ({columns}) VALUES ({marks})",  # noqa: S608  # nosec B608
+        [tuple(f"m{i}" if v == "{id}" else v for v in values) for i in range(3)],
+    )
+    raw.execute(
+        f"INSERT INTO {table} ({columns}) "  # noqa: S608  # nosec B608
+        f"SELECT 'copy-' || id, {columns.split(', ', 1)[1]} FROM {table}"  # noqa: S608  # nosec B608
+    )
+    raw.commit()
+    assert raw.execute(f"SELECT count(*) FROM {table}").fetchone() == (6,)  # noqa: S608  # nosec B608
+
+
+def test_sdk_writes_still_work_after_the_guards(tmp_path: Path) -> None:
+    kb = Ontology.connect(tmp_path / "kb.db", clock=FixedClock(T0))
+    kb.create_principal("alice", kind="human", default_capability="admin")
+    kb.create_principal("bob", kind="human", author="alice")
+    kb.create_principal("carol", kind="human", author="alice")
+
+
+@pytest.mark.parametrize("table", sorted(_ROWS))
 def test_a_file_made_before_the_guard_picks_it_up_on_open(tmp_path: Path, table: str) -> None:
     path = _kb(tmp_path)
     raw = sqlite3.connect(path)
+    _insert(raw, table, "original")
     raw.execute(f"DROP TRIGGER trg_{table}_no_replace_rowid")
+    raw.execute(f"DROP TRIGGER trg_{table}_rowid_positive")
     raw.commit()
+    [(rowid,)] = raw.execute(f"SELECT rowid FROM {table}").fetchall()  # noqa: S608  # nosec B608
     raw.close()
 
     Ontology.connect(path, clock=FixedClock(T0))
 
-    names = {
-        name
-        for (name,) in sqlite3.connect(path).execute(
-            "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+    raw = sqlite3.connect(path)
+    columns, values = _ROWS[table]
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        raw.execute(
+            f"INSERT OR REPLACE INTO {table} (rowid, {columns}) "  # noqa: S608  # nosec B608
+            f"VALUES (?, {', '.join('?' * len(values))})",
+            (rowid, *("other" if v == "{id}" else v for v in values)),
         )
-    }
-    assert f"trg_{table}_no_replace_rowid" in names

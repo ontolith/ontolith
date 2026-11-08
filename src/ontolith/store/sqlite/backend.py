@@ -611,13 +611,29 @@ class SQLiteBackend:
         # rowid and already exist in deployed files, so they cannot become
         # WITHOUT ROWID in place; a second guard on `rowid` under a new name
         # is picked up by an existing file the next time it is opened.
+        #
+        # SQLite shows `NEW.rowid` as -1 in a BEFORE INSERT trigger when it
+        # assigns the rowid itself, so the lookup is skipped for a
+        # non-positive value (otherwise a stored row with rowid -1 would make
+        # every later append look like a collision). To keep that skip safe, a
+        # second trigger refuses any row whose real rowid is not positive;
+        # AFTER INSERT sees the true rowid, and an auto-assigned one is
+        # always positive.
         for table in ("assertion_event", "proposal_event", "admin_event"):
             cursor.execute(f"""
                 CREATE TRIGGER IF NOT EXISTS trg_{table}_no_replace_rowid
                 BEFORE INSERT ON {table}
-                WHEN EXISTS(SELECT 1 FROM {table} WHERE rowid = NEW.rowid)
+                WHEN NEW.rowid > 0 AND EXISTS(SELECT 1 FROM {table} WHERE rowid = NEW.rowid)
                 BEGIN
                     SELECT RAISE(ABORT, '{table} is append-only: REPLACE is not permitted');
+                END
+            """)  # nosec B608
+            cursor.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_rowid_positive
+                AFTER INSERT ON {table}
+                WHEN NEW.rowid <= 0
+                BEGIN
+                    SELECT RAISE(ABORT, '{table} is append-only: a non-positive rowid is not permitted');
                 END
             """)  # nosec B608
 
