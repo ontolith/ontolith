@@ -2694,8 +2694,27 @@ class TestRedactionCommands:
             app, ["--db", str(path), "assertions", "--subject", self.eid, "--all"]
         )
         assert listed.exit_code == 0, listed.output
-        assert "Person.name=''" in listed.output
-        assert listed.output.strip().endswith("redacted")
+        [line] = [ln for ln in listed.output.splitlines() if "Person.name=''" in ln]
+        assert line.endswith("  redacted")
+
+    def test_plain_kb_shows_no_personal_key_or_redacted_marks(self, tmp_path: Path) -> None:
+        from ontolith.schema import Concept, Text, compile_schema
+
+        class Note(Concept):
+            body: Text
+
+        path = tmp_path / "plain.db"
+        kb = Ontology.connect(path)
+        kb.create_principal("admin@example.com", kind="human", default_capability="admin")
+        kb.apply_schema(compile_schema("default", 1, Note), "admin@example.com")
+        eid = kb.create_entity("Note", "admin@example.com").id
+        kb.assert_literal(eid, "Note.body", "hello", "Text", "admin@example.com")
+        kb.close()
+        shown = runner.invoke(app, ["--db", str(path), "schema", "show"])
+        assert "personal_key" not in shown.output
+        listed = runner.invoke(app, ["--db", str(path), "assertions", "--subject", eid])
+        assert "Note.body='hello'" in listed.output
+        assert "redacted" not in listed.output
 
     def test_erase_asks_for_confirmation(self, tmp_path: Path) -> None:
         path = self._kb_path(tmp_path)
