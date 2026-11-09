@@ -22,7 +22,7 @@ on:
       ref:
         description: "Git ref (tag) to build and publish"
         required: true
-        default: v1.2.0
+        default: v1.2.1
   release:
     types: [published]
 
