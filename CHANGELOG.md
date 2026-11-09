@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-08
+
+This patch release hardens the audit tables against a raw-connection bypass and finishes two display
+gaps in redaction mode. Nothing is removed or renamed (`griffe check` is clean against 1.2.0), the
+on-disk `format_version` is unchanged (still `3`), and no migration is needed. Opening a file with
+this release adds two triggers to each of `assertion_event`, `proposal_event` and `admin_event`; an
+existing file picks them up the next time it is opened.
+
 ### Fixed
 - **A REPLACE that collided on `rowid` could remove a row from `assertion_event`, `proposal_event` or
   `admin_event` (KI-117).** The append-only guard on a REPLACE only looked at `id`, so a raw connection
   could name an existing `rowid` with a new id and drop the old row without the delete trigger firing.
-  Each table now has a second guard on `rowid`, plus a trigger that refuses a non-positive `rowid`. A file made by an earlier release gets it the next time
-  it is opened; there is no `format_version` change and no migration.
+  Each table now has a second guard on `rowid`, plus a trigger that refuses a non-positive `rowid`.
+  There is no `format_version` change and no migration.
 - **Redaction mode: two display gaps.** The schema views (CLI `schema show`, REST `GET /schema`,
   GraphQL `schema`, MCP `ontolith.schema`) now show which concepts declare a personal natural key
   (`personal_key`, an additive field defaulting to `false`). The CLI `assertions` listing marks a
@@ -1903,7 +1911,8 @@ new HIGH regressions, closed in a sixth PR.
 - Contribution guidelines and community health files
 - import-linter configuration for dependency rule enforcement
 
-[Unreleased]: https://github.com/ontolith/ontolith/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/ontolith/ontolith/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/ontolith/ontolith/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ontolith/ontolith/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/ontolith/ontolith/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ontolith/ontolith/releases/tag/v1.0.0
