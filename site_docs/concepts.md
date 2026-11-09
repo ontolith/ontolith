@@ -202,6 +202,12 @@ database file (if another process is reading the file the cleanup can be incompl
 are told, and running the erasure again finishes it). The entity, its id, its non-personal facts and an audit record
 of the erasure stay.
 
+To see what a schema marks, look at the schema views: `ontolith schema show`, `GET /schema`,
+the GraphQL `schema` query and the MCP `ontolith.schema` tool show `personal` on each property and
+`personal_key` on each concept. An erased value reads as an empty string, and the provenance
+views (REST, GraphQL and MCP) and the `ontolith assertions` listing mark it as `redacted`, so it
+can be told apart from a value that was empty to begin with.
+
 What it does **not** reach: backups and exports you made earlier, free text
 the schema did not mark, principal ids, logs. The SQLite backend supports the
 mode; the DuckDB backend does not, because it cannot remove old bytes from its
