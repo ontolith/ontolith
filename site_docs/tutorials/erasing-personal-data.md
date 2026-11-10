@@ -121,7 +121,7 @@ before and after the erasure:
 ```python
 wal = db_path.with_name(db_path.name + "-wal")
 data = db_path.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
-print(SECRET.encode() in data)  # True before the erasure, False after
+print(PERSON_NAME.encode() in data)  # True before the erasure, False after
 ```
 
 Look in the write-ahead log as well as the main file: a fresh write sits in the

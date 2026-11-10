@@ -22,14 +22,14 @@ from ontolith import Ontology
 from ontolith.core.errors import CapabilityError, ValidationError
 from ontolith.schema import Concept, Property, Text, compile_schema
 
-SECRET = "Ada Quuxplugh Lovelace"  # a distinctive string, so we can look for it in the file
+PERSON_NAME = "Ada Quuxplugh Lovelace"  # a distinctive string, so we can look for it in the file
 
 
 def _on_disk(db_path: Path) -> bool:
     """Whether the secret is anywhere in the database file or its write-ahead log."""
     wal = db_path.with_name(db_path.name + "-wal")
     data = db_path.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
-    return SECRET.encode() in data
+    return PERSON_NAME.encode() in data
 
 
 def main() -> None:
@@ -59,14 +59,18 @@ def main() -> None:
 
     kb.apply_schema(compile_schema("default", 1, Customer), author=admin.id)
 
-    ada = kb.create_entity(concept="Customer", author=admin.id, natural_key=SECRET)
+    ada = kb.create_entity(concept="Customer", author=admin.id, natural_key=PERSON_NAME)
     name = kb.assert_literal(
-        subject=ada.id, predicate="Customer.name", value=SECRET, value_type="Text", author=admin.id
+        subject=ada.id,
+        predicate="Customer.name",
+        value=PERSON_NAME,
+        value_type="Text",
+        author=admin.id,
     )
     kb.assert_literal(
         subject=ada.id, predicate="Customer.plan", value="pro", value_type="Text", author=admin.id
     )
-    print(f"2. recorded {SECRET!r} and a plan for the customer")
+    print(f"2. recorded {PERSON_NAME!r} and a plan for the customer")
     print(f"   the value is on disk now: {_on_disk(db_path)}")
 
     # 3. Only a human admin may erase. An AI principal is refused, whatever
