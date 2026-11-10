@@ -76,6 +76,14 @@ module importing a concrete adapter fails the build, not just a review.
   [`conformance/`](https://github.com/ontolith/ontolith/tree/main/conformance/)
   holds the SPEC §19 test vectors. Any `StorageBackend` can run them to
   check its own behavior; the SQLite and DuckDB backends both do.
+- **Erasure is opt-in and sits beside the storage port.** A knowledge base is
+  `strict` by default, and nothing in it is ever altered or removed. In
+  `redaction` mode a human `admin` can erase a person's marked data, bytes
+  included. That needs more than a `StorageBackend` can promise, so it is a
+  separate, optional `RedactionBackend` protocol: SQLite implements it, DuckDB
+  does not, and a backend without it cannot be put in `redaction` mode. The
+  domain code plans an erasure as pure data and the backend applies it in one
+  transaction.
 - **Plugins stay governed.** Plugins are discovered through the
   `ontolith.plugins` entry-point group and run in a separate process by
   default. A reasoner's derived facts go through the proposal path like

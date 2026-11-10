@@ -208,6 +208,8 @@ the GraphQL `schema` query and the MCP `ontolith.schema` tool show `personal` on
 views (REST, GraphQL and MCP) and the `ontolith assertions` listing mark it as `redacted`, so it
 can be told apart from a value that was empty to begin with.
 
+A runnable walk-through is in the [Erasing Personal Data](tutorials/erasing-personal-data.md) tutorial.
+
 What it does **not** reach: backups and exports you made earlier, free text
 the schema did not mark, principal ids, logs. The SQLite backend supports the
 mode; the DuckDB backend does not, because it cannot remove old bytes from its

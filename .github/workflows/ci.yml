@@ -193,6 +193,7 @@ jobs:
           uv run python -u examples/bitemporal_queries.py
           uv run python -u examples/writing_a_plugin.py
           uv run python -u examples/hybrid_search.py
+          uv run python -u examples/erasing_personal_data.py
 
   benchmarks:
     # M4 Workstream 1 exit gate: the 5 SPEC §9 budget rows are enforced as
