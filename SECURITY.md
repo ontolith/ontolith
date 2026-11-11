@@ -34,5 +34,6 @@ When using Ontolith:
 - Keep dependencies updated
 - Rotate and revoke API-key tokens proactively — the only shipped `AuthProvider` today is per-principal API keys (ADR-0014); OIDC/workload-identity support is documented as future work, not yet implemented
 - Review AI-authored assertions before accepting
+- If you must be able to erase a person's data, create the knowledge base in `redaction` mode (or enable it once) and mark the properties that identify a person as `personal` in the schema. Only a human principal holding `admin` can erase. Backups, exports, unmarked free text and logs are out of scope, and a redaction-mode file must not be opened with a release older than 1.2.0 (ADR-0056)
 - Configure appropriate policy thresholds
 - Structured logs are on by default (`kb.observability`, ADR-0044); correlate them with the `namespace`/`principal`/`proposal_id` fields they already carry for audit purposes in production

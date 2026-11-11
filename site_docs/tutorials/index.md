@@ -9,6 +9,7 @@ uv run python examples/governance_and_review.py
 uv run python examples/bitemporal_queries.py
 uv run python examples/writing_a_plugin.py
 uv run python examples/hybrid_search.py
+uv run python examples/erasing_personal_data.py
 ```
 
 - **[Governance & Review](governance-and-review.md)** — why AI proposals
@@ -20,3 +21,6 @@ uv run python examples/hybrid_search.py
   reference plugin through the sandboxed, capability-scoped plugin system.
 - **[Hybrid Search](hybrid-search.md)** — combining vector similarity
   search with symbolic `.where()` filters and provenance-confidence floors.
+- **[Erasing Personal Data](erasing-personal-data.md)** — the opt-in
+  `redaction` mode: marking what identifies a person, who may erase it, and
+  how to check the bytes are gone.
